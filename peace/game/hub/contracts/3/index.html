@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Contract #3 — QuestEscrow (Pro) · Integrity-Guarded</title>
+<meta name="theme-color" content="#0b0f1a"/>
+<style>
+:root{
+  --bg:#0b0f1a; --panel:#0f1524; --glass:rgba(255,255,255,.06);
+  --ink:#e6ecff; --muted:#98a6c7; --accent:#7aa2ff; --good:#5ee1a0; --bad:#ff6b7a; --warn:#ffd36a;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu}
+canvas#bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(1200px 800px at 70% 20%,#101832 0%,#0b0f1a 50%,#070a11 100%)}
+main{max-width:1200px;margin:24px auto 90px;padding:0 16px}
+.card{background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.01));border:1px solid rgba(122,162,255,.16);border-radius:16px;padding:18px;box-shadow:0 10px 34px rgba(0,0,0,.28);margin-bottom:14px}
+h1{font-size:18px;letter-spacing:.08em;text-transform:uppercase;color:#cfe1ff;margin:4px 0 8px}
+h2{font-size:16px;margin:0 0 8px;color:#d9e6ff}
+.muted{color:var(--muted);font-size:14px}
+label{display:block;font-size:13px;color:#b6c7ef;margin:10px 0 4px}
+input,textarea,select{width:100%;background:var(--glass);border:1px solid rgba(255,255,255,.12);color:var(--ink);border-radius:10px;padding:10px 12px;outline:none}
+textarea{min-height:88px;font-family:ui-monospace,Consolas,Menlo,monospace}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:200px}
+button{background:linear-gradient(180deg,#20305c,#152043);color:#eaf1ff;border:1px solid rgba(122,162,255,.35);border-radius:12px;padding:10px 12px;cursor:pointer;transition:transform .04s ease,box-shadow .2s ease;white-space:nowrap}
+button:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(122,162,255,.18)}
+.pill{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:var(--glass);font-size:12px}
+.hr{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.18),transparent);margin:12px 0}
+.status{font-size:13px;color:#b7c8ef;white-space:pre-wrap}
+.mono{font-family:ui-monospace,Consolas,Menlo,monospace;word-break:break-all}
+.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+#xpFeed{max-height:180px;overflow:auto}
+footer{color:#8ea4d9;text-align:center;margin-top:22px}
+.small{font-size:12px;color:#93a4d7}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<main>
+
+  <div class="card">
+    <h1>Contract #3 · QuestEscrow (Pro)</h1>
+    <div class="muted">
+      Mission escrow for peace quests: <b>post</b> with bounty → <b>fund</b> → <b>submit</b> evidence (dual-hash) with stake → <b>finalize</b> by verifier → losers <b>withdrawStake</b> → creator/admin may <b>cancel</b>.<br/>
+      All state changes are <b>integrity‑guarded</b> by an Anti‑Inversion Guard (allow‑listed <code>extcodehash</code> per <i>contractKey</i>).
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnConnect">Connect Wallet</button>
+      <span id="acct" class="pill" style="display:none"></span>
+      <span id="net" class="pill" style="display:none"></span>
+    </div>
+  </div>
+
+  <!-- Deploy -->
+  <div class="card">
+    <h2>Deploy Suite · Guard → Impl → Allow → Proxy+Initialize</h2>
+    <div class="row">
+      <div><label>Admin (DAO/Timelock)</label><input id="admin" placeholder="0x… (defaults to connected)"/></div>
+      <div><label>Existing Guard (optional)</label><input id="guardAddr" placeholder="0x… (leave empty to deploy new)"/></div>
+    </div>
+    <div class="row">
+      <div><label>Contract Key (bytes32)</label><input id="ckey" placeholder="keccak256('QuestEscrow@pro')"/></div>
+      <div><label>Fee Recipient</label><input id="feeRec" placeholder="0x… (optional)"/></div>
+      <div><label>Fee (bps)</label><input id="feeBps" value="0" /></div>
+    </div>
+    <div class="row">
+      <div><label>Min Bounty (ETH)</label><input id="minBounty" value="0.01"/></div>
+      <div><label>Min Stake (ETH)</label><input id="minStake" value="0.005"/></div>
+      <div><label>Base URI (optional)</label><input id="baseURI" placeholder="ipfs://cid/ or https://…"/></div>
+    </div>
+
+    <label>Canonical Spec / Audit Text (for dual-hash provenance)</label>
+    <textarea id="docText" placeholder="Paste canonical README/audit text or CID. We'll hash it."></textarea>
+    <div class="row">
+      <div><label>sha256 → bytes32</label><input id="hashA" placeholder="0x…" /></div>
+      <div><label>blake3 → bytes32</label><input id="hashB" placeholder="0x…" /></div>
+    </div>
+    <div class="row">
+      <button id="btnHash">Compute Dual Hashes</button>
+      <button id="btnDeploy">Deploy All</button>
+      <button id="btnVerify">Verify Integrity</button>
+    </div>
+    <div class="hr"></div>
+    <div class="status mono" id="deployOut">—</div>
+  </div>
+
+  <!-- Addresses -->
+  <div class="card">
+    <h2>Addresses & Hashes</h2>
+    <div><b>Guard:</b> <span id="outGuard" class="mono">—</span></div>
+    <div><b>QuestEscrow Impl:</b> <span id="outImpl" class="mono">—</span></div>
+    <div><b>Impl codeHash:</b> <span id="outHash" class="mono">—</span></div>
+    <div><b>Proxy (Escrow):</b> <span id="outProxy" class="mono">—</span></div>
+    <div><b>ContractKey:</b> <span id="outKey" class="mono">—</span></div>
+    <div><b>Doc A/B:</b> <span id="outDoc" class="mono">—</span></div>
+    <div class="small">Auto‑registers this ABI+address in your hub under title <b>QuestEscrow</b>.</div>
+  </div>
+
+  <!-- Ops -->
+  <div class="card">
+    <h2>Operate QuestEscrow</h2>
+    <div class="row"><input id="escAddr" placeholder="Proxy address (auto‑filled)" /></div>
+
+    <h3 class="small">Post / Fund</h3>
+    <div class="row">
+      <div><label>Post: Region</label><input id="postRegion" placeholder="gaza / sudan / ukraine"/></div>
+      <div><label>Post: Category</label><input id="postCat" placeholder="ceasefire / corridor / water / food"/></div>
+    </div>
+    <div class="row">
+      <div><label>Spec Hash A (sha256 bytes32)</label><input id="postA" placeholder="0x…"/></div>
+      <div><label>Spec Hash B (blake3 bytes32)</label><input id="postB" placeholder="0x…"/></div>
+      <div><label>Bounty (ETH)</label><input id="postValue" value="0.05"/></div>
+      <div style="align-self:end"><button id="btnPost">Post</button></div>
+    </div>
+    <div class="row">
+      <div><label>Fund: Mission ID</label><input id="fundId" placeholder="uint256"/></div>
+      <div><label>Amount (ETH)</label><input id="fundVal" value="0.01"/></div>
+      <div style="align-self:end"><button id="btnFund">Fund</button></div>
+    </div>
+
+    <h3 class="small">Submit / Finalize / Cancel / Withdraw Stake</h3>
+    <div class="row">
+      <div><label>Submit: Mission ID</label><input id="subId" placeholder="uint256"/></div>
+      <div><label>Evidence Hash A (sha256)</label><input id="subA" placeholder="0x…"/></div>
+      <div><label>Evidence Hash B (blake3)</label><input id="subB" placeholder="0x…"/></div>
+      <div><label>Stake (ETH)</label><input id="subStake" value="0.01"/></div>
+      <div style="align-self:end"><button id="btnSubmit">Submit</button></div>
+    </div>
+    <div class="row">
+      <div><label>Finalize: Mission ID</label><input id="finId" placeholder="uint256"/></div>
+      <div><label>Winning Submission Index</label><input id="finSub" placeholder="uint256"/></div>
+      <div style="align-self:end"><button id="btnFinalize">Finalize</button></div>
+    </div>
+    <div class="row">
+      <div><label>Cancel: Mission ID</label><input id="cancelId" placeholder="uint256"/></div>
+      <div style="align-self:end"><button id="btnCancel">Cancel</button></div>
+      <div><label>Withdraw Stake: Mission ID</label><input id="wId" placeholder="uint256"/></div>
+      <div><label>Submission Index</label><input id="wSub" placeholder="uint256"/></div>
+      <div style="align-self:end"><button id="btnWithdraw">Withdraw Stake</button></div>
+    </div>
+
+    <h3 class="small">Admin & Params</h3>
+    <div class="row">
+      <div><label>Set Fee Recipient</label><input id="paramFeeRec" placeholder="0x…"/></div>
+      <div><label>Fee (bps)</label><input id="paramFeeBps" placeholder="100"/></div>
+      <div style="align-self:end"><button id="btnSetFee">Set Fees</button></div>
+      <div><label>Min Bounty (ETH)</label><input id="paramMinBounty" placeholder="0.01"/></div>
+      <div><label>Min Stake (ETH)</label><input id="paramMinStake" placeholder="0.005"/></div>
+      <div style="align-self:end"><button id="btnSetMin">Set Minimums</button></div>
+    </div>
+    <div class="row">
+      <div><label>Grant Role (name)</label><input id="roleNameG" placeholder="VERIFIER_ROLE"/></div>
+      <div><label>to</label><input id="roleAddrG" placeholder="0x…"/></div>
+      <div style="align-self:end"><button id="btnGrant">Grant</button></div>
+      <div><label>Revoke Role (name)</label><input id="roleNameR" placeholder="VERIFIER_ROLE"/></div>
+      <div><label>from</label><input id="roleAddrR" placeholder="0x…"/></div>
+      <div style="align-self:end"><button id="btnRevoke">Revoke</button></div>
+    </div>
+    <div class="row">
+      <div style="align-self:end"><button id="btnPause">Pause</button></div>
+      <div style="align-self:end"><button id="btnUnpause">Unpause</button></div>
+      <div style="align-self:end"><button id="btnVersion">version()</button></div>
+    </div>
+
+    <h3 class="small">Reads</h3>
+    <div class="row">
+      <div><label>Get Mission: ID</label><input id="readMid" placeholder="uint256"/></div>
+      <div style="align-self:end"><button id="btnReadMission">Read</button></div>
+      <div><label>Get Submission: (ID, idx)</label><input id="readSid" placeholder="uint256"/></div>
+      <div><label>idx</label><input id="readSidx" placeholder="uint256"/></div>
+      <div style="align-self:end"><button id="btnReadSubmission">Read</button></div>
+      <div style="align-self:end"><button id="btnSubCount">submissionCount()</button></div>
+    </div>
+
+    <div class="hr"></div>
+    <div class="status mono" id="opsOut">—</div>
+  </div>
+
+  <!-- Events + XP -->
+  <div class="card">
+    <h2>Live Events & XP</h2>
+    <div class="row">
+      <div class="pill">XP <b id="xpTotal">0</b></div>
+      <div class="pill">Streak <b id="streak">0</b>d</div>
+      <div class="pill">Badges <b id="badges">0</b></div>
+      <button id="btnSubscribe">Subscribe Events</button>
+    </div>
+    <div id="xpFeed" class="status mono"></div>
+  </div>
+
+  <!-- Integrity Verify -->
+  <div class="card">
+    <h2>Integrity Verify</h2>
+    <div class="row">
+      <div><label>Proxy Address</label><input id="vProxy" placeholder="0x…"/></div>
+      <div><label>Guard Address</label><input id="vGuard" placeholder="0x…"/></div>
+      <div><label>Contract Key</label><input id="vKey" placeholder="bytes32"/></div>
+    </div>
+    <div class="row">
+      <button id="btnVerify2">Verify</button>
+    </div>
+    <div class="status mono" id="verifyOut">—</div>
+  </div>
+
+  <footer>© Constellation microconsole · Integrity‑first · Dual‑hash provenance. </footer>
+</main>
+
+<!-- libs -->
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.min.js"></script>
+<script src="https://binaries.soliditylang.org/bin/soljson-v0.8.24+commit.e11b9ed9.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/blake3/browser.js"></script>
+
+<script>
+/* ===== background ===== */
+(function(){const c=document.getElementById('bg'),x=c.getContext('2d');let w,h,S=[];
+function rs(){w=c.width=innerWidth;h=c.height=innerHeight;S=Array.from({length:Math.floor(w*h/13000)},()=>({x:Math.random()*w,y:Math.random()*h,z:Math.random()*.6+.4,r:Math.random()*1.6+.2}))}
+addEventListener('resize',rs);rs();(function t(){x.clearRect(0,0,w,h);for(const s of S){s.x+=(s.z-.5)*.3;s.y+=(s.z-.5)*.3;if(s.x<0)s.x+=w;if(s.x>w)s.x-=w;if(s.y<0)s.y+=h;if(s.y>h)s.y-=h;x.globalAlpha=.6*s.z;x.beginPath();x.arc(s.x,s.y,s.r,0,Math.PI*2);x.fillStyle='rgba(170,195,255,.9)';x.fill()}requestAnimationFrame(t)})()})();
+
+/* ===== wallet ===== */
+let provider, signer, account, network;
+const $=id=>document.getElementById(id);
+$('btnConnect').onclick=async()=>{
+  if(!window.ethereum){alert('No wallet');return}
+  provider=new ethers.BrowserProvider(window.ethereum);
+  await provider.send('eth_requestAccounts',[]);
+  signer=await provider.getSigner(); account=await signer.getAddress(); network=await provider.getNetwork();
+  $('acct').style.display='inline-block';$('acct').textContent=account;
+  $('net').style.display='inline-block';$('net').textContent=(network.name||'net')+' #'+network.chainId;
+};
+
+/* ===== utils ===== */
+const toBytes32=(hex)=>{hex=String(hex||'');if(hex.startsWith('0x'))hex=hex.slice(2);if(hex.length>64)hex=hex.slice(0,64);return '0x'+hex.padStart(64,'0')}
+const sha256=async(bytes)=>{const h=await crypto.subtle.digest('SHA-256',bytes);return '0x'+[...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+function log(el,msg){el.textContent=msg}
+
+/* ===== Solidity sources ===== */
+const SRC={
+  Ownable: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+contract Ownable {
+  event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+  address public owner;
+  constructor(){ owner = msg.sender; emit OwnershipTransferred(address(0), msg.sender); }
+  modifier onlyOwner(){ require(msg.sender==owner, "OWN"); _; }
+  function transferOwnership(address n) public onlyOwner { require(n!=address(0),"0"); emit OwnershipTransferred(owner,n); owner=n; }
+}
+`,
+  IAnti: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+interface IAntiInversionGuard {
+  function isAllowed(bytes32 contractKey, bytes32 codeHash) external view returns(bool);
+  function allow(bytes32 contractKey, bytes32 codeHash, string calldata meta) external;
+  function revoke(bytes32 contractKey, bytes32 codeHash) external;
+}
+`,
+  Guard: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import "./Ownable.sol";
+import "./IAntiInversionGuard.sol";
+contract AntiInversionGuard is IAntiInversionGuard, Ownable {
+  mapping(bytes32=>mapping(bytes32=>bool)) private allowed;
+  event AllowCodeHash(bytes32 indexed contractKey, bytes32 indexed codeHash, string meta);
+  event RevokeCodeHash(bytes32 indexed contractKey, bytes32 indexed codeHash);
+  function isAllowed(bytes32 k, bytes32 h) external view returns(bool){ return allowed[k][h]; }
+  function allow(bytes32 k, bytes32 h, string calldata meta) external onlyOwner { allowed[k][h]=true; emit AllowCodeHash(k,h,meta); }
+  function revoke(bytes32 k, bytes32 h) external onlyOwner { allowed[k][h]=false; emit RevokeCodeHash(k,h); }
+}
+`,
+  Guarded: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import "./IAntiInversionGuard.sol";
+abstract contract IntegrityGuarded {
+  bytes32 private constant _IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+  IAntiInversionGuard public integrityGuard;
+  bytes32 public contractKey;
+  bytes32 public docHashA; bytes32 public docHashB;
+  string  public docLabelA; string public docLabelB;
+  event IntegrityGuardSet(address indexed guard, bytes32 indexed key);
+  event DocumentHashesSet(bytes32 docA, bytes32 docB, string la, string lb);
+  function _integrityInit(address guard_, bytes32 key_, bytes32 a, bytes32 b, string memory la, string memory lb) internal {
+    require(guard_!=address(0),"guard=0");
+    integrityGuard = IAntiInversionGuard(guard_); contractKey = key_;
+    docHashA=a; docHashB=b; docLabelA=la; docLabelB=lb;
+    emit IntegrityGuardSet(guard_, key_); emit DocumentHashesSet(a,b,la,lb);
+    _assertIntegrity();
+  }
+  function _impl() internal view returns(address impl){ bytes32 slot=_IMPL_SLOT; assembly{ impl := sload(slot) } }
+  function _assertIntegrity() internal view {
+    address impl = _impl(); require(impl!=address(0),"impl=0");
+    bytes32 h; assembly{ h := extcodehash(impl) }
+    require(integrityGuard.isAllowed(contractKey, h), "INTEGRITY");
+  }
+  modifier ensureIntegrity(){ _assertIntegrity(); _; }
+}
+`,
+  Escrow: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import "./IntegrityGuarded.sol";
+
+/**
+ * @title QuestEscrow (Pro)
+ * @notice Mission escrow for verified peace impact:
+ *         post (bounty, payable) → fund → submit (stake, payable) → finalize (verifier) → losers withdrawStake → cancel.
+ * @dev Anti-Inversion integrity guard (fail-closed), custom errors, reentrancy guard, fee bps, minimums.
+ */
+contract QuestEscrow is IntegrityGuarded {
+  // ---------------- Errors ----------------
+  error Unauthorized();
+  error Paused();
+  error ZeroAddress();
+  error ZeroAmount();
+  error BountyTooSmall();
+  error StakeTooSmall();
+  error BadStatus();
+  error NoMission();
+  error NoSubmission();
+  error AlreadyClaimed();
+
+  // ---------------- Roles/Pause ----------------
+  bytes32 public constant ADMIN_ROLE    = keccak256("ADMIN_ROLE");
+  bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
+  bytes32 public constant PAUSER_ROLE   = keccak256("PAUSER_ROLE");
+  mapping(bytes32=>mapping(address=>bool)) private roles;
+  bool public paused;
+
+  // ---------------- Reentrancy ----------------
+  uint256 private locked = 1;
+  modifier nonReentrant(){ require(locked==1, "REENTRANCY"); locked=2; _; locked=1; }
+
+  // ---------------- Storage ----------------
+  enum Status { Posted, Cancelled, Finalized }
+  struct Mission {
+    address creator;
+    uint256 bounty;
+    string  region;
+    string  category;
+    bytes32 specA;
+    bytes32 specB;
+    Status  status;
+    uint64  postedAt;
+    address winner;
+  }
+  struct Submission {
+    address actor;
+    bytes32 hashA;
+    bytes32 hashB;
+    uint256 stake;
+    uint64  ts;
+    bool    accepted;
+  }
+
+  uint256 public nextMissionId;
+  mapping(uint256=>Mission)                 public missions;
+  mapping(uint256=>Submission[])            private _subs;
+  mapping(uint256=>mapping(uint256=>bool))  public stakeClaimed;
+
+  // Fees & minimums
+  address public feeRecipient;
+  uint16  public feeBps;          // out of 10_000
+  uint256 public minBounty;
+  uint256 public minStake;
+
+  // Events
+  event RoleGranted(bytes32 indexed role, address indexed account);
+  event RoleRevoked(bytes32 indexed role, address indexed account);
+  event Paused(address indexed by);
+  event Unpaused(address indexed by);
+
+  event MissionPosted(uint256 indexed id, address indexed creator, uint256 bounty, string region, string category, bytes32 specA, bytes32 specB);
+  event MissionFunded(uint256 indexed id, address indexed funder, uint256 amount, uint256 newBounty);
+  event Submitted(uint256 indexed id, uint256 indexed subId, address indexed actor, uint256 stake, bytes32 hashA, bytes32 hashB);
+  event Finalized(uint256 indexed id, uint256 indexed subId, address indexed winner, uint256 payout, uint256 fee);
+  event Canceled(uint256 indexed id, address indexed by, uint256 refund);
+
+  event FeeParamsSet(address recipient, uint16 bps);
+  event MinParamsSet(uint256 minBounty, uint256 minStake);
+  event Upgraded(address indexed newImpl);
+
+  bool private _initialized;
+
+  // ---------------- Modifiers ----------------
+  modifier onlyRole(bytes32 r){ if(!roles[r][msg.sender]) revert Unauthorized(); _; }
+  modifier whenNotPaused(){ if(paused) revert Paused(); _; }
+
+  // ---------------- Initialize ----------------
+  function initialize(
+    address admin,
+    address guard,
+    bytes32 contractKey_,
+    bytes32 docHashA_,
+    bytes32 docHashB_,
+    string  memory labelA,
+    string  memory labelB,
+    address feeRecipient_,
+    uint16  feeBps_,
+    uint256 minBounty_,
+    uint256 minStake_
+  ) external {
+    if(_initialized) revert Unauthorized();
+    if(admin==address(0)) revert ZeroAddress();
+    _initialized = true;
+
+    // roles
+    roles[ADMIN_ROLE][admin]    = true; emit RoleGranted(ADMIN_ROLE, admin);
+    roles[VERIFIER_ROLE][admin] = true; emit RoleGranted(VERIFIER_ROLE, admin);
+    roles[PAUSER_ROLE][admin]   = true; emit RoleGranted(PAUSER_ROLE, admin);
+
+    // integrity + provenance
+    _integrityInit(guard, contractKey_, docHashA_, docHashB_, labelA, labelB);
+
+    // params
+    feeRecipient = feeRecipient_; feeBps = feeBps_;
+    minBounty = minBounty_; minStake = minStake_;
+    emit FeeParamsSet(feeRecipient_, feeBps_);
+    emit MinParamsSet(minBounty_, minStake_);
+  }
+
+  // ---------------- Roles ----------------
+  function hasRole(bytes32 role, address a) public view returns(bool){ return roles[role][a]; }
+  function grantRole(bytes32 role, address a) external ensureIntegrity onlyRole(ADMIN_ROLE){ if(a==address(0)) revert ZeroAddress(); if(!roles[role][a]){ roles[role][a]=true; emit RoleGranted(role,a);} }
+  function revokeRole(bytes32 role, address a) external ensureIntegrity onlyRole(ADMIN_ROLE){ if(roles[role][a]){ roles[role][a]=false; emit RoleRevoked(role,a);} }
+  function renounceRole(bytes32 role) external ensureIntegrity { if(roles[role][msg.sender]){ roles[role][msg.sender]=false; emit RoleRevoked(role,msg.sender);} }
+
+  // ---------------- Pause ----------------
+  function pause() external ensureIntegrity onlyRole(PAUSER_ROLE){ paused=true; emit Paused(msg.sender); }
+  function unpause() external ensureIntegrity onlyRole(PAUSER_ROLE){ paused=false; emit Unpaused(msg.sender); }
+
+  // ---------------- Post / Fund ----------------
+  function post(
+    string calldata region,
+    string calldata category,
+    bytes32 specA,
+    bytes32 specB
+  ) external payable ensureIntegrity whenNotPaused nonReentrant returns(uint256 id){
+    if(msg.value==0) revert ZeroAmount();
+    if(msg.value < minBounty) revert BountyTooSmall();
+    unchecked{ ++nextMissionId; } id = nextMissionId;
+    missions[id] = Mission(msg.sender, msg.value, region, category, specA, specB, Status.Posted, uint64(block.timestamp), address(0));
+    emit MissionPosted(id, msg.sender, msg.value, region, category, specA, specB);
+  }
+
+  function fund(uint256 id) external payable ensureIntegrity whenNotPaused nonReentrant {
+    Mission storage m = missions[id];
+    if(m.creator==address(0)) revert NoMission();
+    if(m.status != Status.Posted) revert BadStatus();
+    if(msg.value==0) revert ZeroAmount();
+    m.bounty += msg.value;
+    emit MissionFunded(id, msg.sender, msg.value, m.bounty);
+  }
+
+  // ---------------- Submit / Finalize ----------------
+  function submit(uint256 id, bytes32 hashA, bytes32 hashB)
+    external payable ensureIntegrity whenNotPaused nonReentrant returns(uint256 subIndex)
+  {
+    Mission storage m = missions[id];
+    if(m.creator==address(0)) revert NoMission();
+    if(m.status != Status.Posted) revert BadStatus();
+    if(msg.value < minStake) revert StakeTooSmall();
+
+    _subs[id].push(Submission(msg.sender, hashA, hashB, msg.value, uint64(block.timestamp), false));
+    subIndex = _subs[id].length - 1;
+    emit Submitted(id, subIndex, msg.sender, msg.value, hashA, hashB);
+  }
+
+  function finalize(uint256 id, uint256 subIndex)
+    external ensureIntegrity onlyRole(VERIFIER_ROLE) whenNotPaused nonReentrant
+  {
+    Mission storage m = missions[id];
+    if(m.creator==address(0)) revert NoMission();
+    if(m.status != Status.Posted) revert BadStatus();
+    if(subIndex >= _subs[id].length) revert NoSubmission();
+
+    Submission storage s = _subs[id][subIndex];
+    s.accepted = true;
+    m.status   = Status.Finalized;
+    m.winner   = s.actor;
+
+    uint256 payout = m.bounty;
+    m.bounty = 0; // zero before transfers
+    uint256 fee = feeRecipient == address(0) ? 0 : (payout * feeBps) / 10_000;
+    uint256 toWinner = payout - fee;
+
+    (bool ok1,) = s.actor.call{value: toWinner}(""); require(ok1,"PAY_WIN");
+    // winner also gets their stake back
+    uint256 stake = s.stake; s.stake = 0;
+    (bool okS,) = s.actor.call{value: stake}(""); require(okS,"PAY_STAKE_WIN");
+    if(fee>0){ (bool ok2,) = feeRecipient.call{value: fee}(""); require(ok2, "PAY_FEE"); }
+
+    emit Finalized(id, subIndex, s.actor, toWinner, fee);
+  }
+
+  function cancel(uint256 id)
+    external ensureIntegrity whenNotPaused nonReentrant
+  {
+    Mission storage m = missions[id];
+    if(m.creator==address(0)) revert NoMission();
+    if(m.status != Status.Posted) revert BadStatus();
+    if(msg.sender != m.creator && !roles[ADMIN_ROLE][msg.sender]) revert Unauthorized();
+
+    m.status = Status.Cancelled;
+    uint256 refund = m.bounty; m.bounty = 0;
+    (bool ok,) = m.creator.call{value: refund}(""); require(ok,"REFUND");
+    emit Canceled(id, msg.sender, refund);
+  }
+
+  /** Losers reclaim stake after Finalized/Cancelled */
+  function withdrawStake(uint256 id, uint256 subIndex)
+    external ensureIntegrity nonReentrant
+  {
+    if(subIndex >= _subs[id].length) revert NoSubmission();
+    Submission storage s = _subs[id][subIndex];
+    if(s.actor != msg.sender) revert Unauthorized();
+    Mission storage m = missions[id];
+    if(m.status == Status.Posted) revert BadStatus();
+    if(s.accepted) revert AlreadyClaimed();
+    if(stakeClaimed[id][subIndex]) revert AlreadyClaimed();
+
+    stakeClaimed[id][subIndex] = true;
+    uint256 amt = s.stake; s.stake = 0;
+    (bool ok,) = msg.sender.call{value: amt}(""); require(ok,"PAY_STAKE");
+  }
+
+  // ---------------- Params ----------------
+  function setFeeParams(address recipient, uint16 bps) external ensureIntegrity onlyRole(ADMIN_ROLE){
+    feeRecipient = recipient; feeBps = bps; emit FeeParamsSet(recipient, bps);
+  }
+  function setMinParams(uint256 minBounty_, uint256 minStake_) external ensureIntegrity onlyRole(ADMIN_ROLE){
+    minBounty = minBounty_; minStake = minStake_; emit MinParamsSet(minBounty_, minStake_);
+  }
+
+  // ---------------- Views ----------------
+  function submissionCount(uint256 id) external view returns(uint256){ return _subs[id].length; }
+  function getMission(uint256 id) external view returns(
+    address creator, uint256 bounty, string memory region, string memory category,
+    bytes32 specA, bytes32 specB, uint8 status, uint64 postedAt, address winner
+  ){
+    Mission storage m = missions[id]; if(m.creator==address(0)) revert NoMission();
+    return (m.creator, m.bounty, m.region, m.category, m.specA, m.specB, uint8(m.status), m.postedAt, m.winner);
+  }
+  function getSubmission(uint256 id, uint256 subIndex) external view returns(
+    address actor, bytes32 hashA, bytes32 hashB, uint256 stake, uint64 ts, bool accepted
+  ){
+    if(subIndex >= _subs[id].length) revert NoSubmission();
+    Submission storage s = _subs[id][subIndex];
+    return (s.actor, s.hashA, s.hashB, s.stake, s.ts, s.accepted);
+  }
+
+  // ---------------- Upgrade (UUPS-like) ----------------
+  function upgradeTo(address newImpl) external onlyRole(ADMIN_ROLE){
+    if(newImpl==address(0)) revert ZeroAddress();
+    bytes32 h; assembly{ h := extcodehash(newImpl) }
+    require(integrityGuard.isAllowed(contractKey, h), "INTEGRITY");
+    bytes32 slot=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+    assembly{ sstore(slot, newImpl) }
+    emit Upgraded(newImpl);
+  }
+
+  // ---------------- Convenience ----------------
+  function version() external pure returns(string memory){ return "QuestEscrow/1.1.0-pro"; }
+}
+`,
+  Proxy: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+/** Minimal ERC1967 proxy: stores impl in EIP-1967 slot; delegatecalls; initializer in ctor. */
+contract ERC1967Proxy {
+  bytes32 private constant _IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+  constructor(address logic, bytes memory initData){
+    assembly{ sstore(_IMPL_SLOT, logic) }
+    if(initData.length>0){ (bool ok,) = logic.delegatecall(initData); require(ok,"init fail"); }
+  }
+  fallback() external payable { assembly {
+    let impl := sload(_IMPL_SLOT)
+    calldatacopy(0,0,calldatasize())
+    let r := delegatecall(gas(),impl,0,calldatasize(),0,0)
+    returndatacopy(0,0,returndatasize())
+    switch r case 0 { revert(0, returndatasize()) } default { return(0, returndatasize()) }
+  } }
+  receive() external payable {}
+}
+`
+};
+
+/* ===== compile ===== */
+async function compileAll(){
+  const input={language:"Solidity",settings:{optimizer:{enabled:true,runs:200},outputSelection:{"*":{"*":["abi","evm.bytecode.object"]}}},sources:{
+    "Ownable.sol":{content:SRC.Ownable},
+    "IAntiInversionGuard.sol":{content:SRC.IAnti},
+    "AntiInversionGuard.sol":{content:SRC.Guard},
+    "IntegrityGuarded.sol":{content:SRC.Guarded},
+    "QuestEscrow.sol":{content:SRC.Escrow},
+    "ERC1967Proxy.sol":{content:SRC.Proxy}
+  }};
+  const solc = await new Promise(res=>Module.onRuntimeInitialized=()=>res(Module));
+  const out = JSON.parse(solc.cwrap("compileStandard","string",["string"])(JSON.stringify(input)));
+  if(out.errors){
+    const fatal = out.errors.filter(e=>e.severity==='error');
+    if(fatal.length) throw new Error(fatal.map(e=>e.formattedMessage).join("\n"));
+  }
+  const get=(file,name)=>({abi:out.contracts[file][name].abi, bytecode:'0x'+out.contracts[file][name].evm.bytecode.object});
+  return {
+    Guard:  get("AntiInversionGuard.sol","AntiInversionGuard"),
+    Escrow: get("QuestEscrow.sol","QuestEscrow"),
+    Proxy:  get("ERC1967Proxy.sol","ERC1967Proxy")
+  };
+}
+
+/* ===== dual hash ===== */
+$('btnHash').onclick=async()=>{
+  const txt=$('docText').value||''; const enc=new TextEncoder(); const bytes=enc.encode(txt);
+  const sha=await sha256(bytes); $('hashA').value=toBytes32(sha);
+  const bl=blake3.hash(bytes); const blHex='0x'+[...bl].map(b=>b.toString(16).padStart(2,'0')).join('');
+  $('hashB').value=toBytes32(blHex);
+  $('outDoc').textContent=`sha256:${$('hashA').value} | blake3:${$('hashB').value}`;
+};
+
+/* ===== deploy flow ===== */
+$('btnDeploy').onclick=async()=>{
+  const out=$('deployOut'); log(out,'Compiling…');
+  try{
+    if(!signer) throw new Error('Connect wallet first');
+    const compiled = await compileAll();
+
+    const admin = $('admin').value || account;
+    const existingGuard = $('guardAddr').value.trim();
+    const key = toBytes32($('ckey').value || '0x');
+    const feeRec = $('feeRec').value || ethers.ZeroAddress;
+    const feeBps = parseInt($('feeBps').value||'0',10);
+    const minBounty = $('minBounty').value;
+    const minStake  = $('minStake').value;
+    const base = $('baseURI').value||'';
+    const hA = $('hashA').value || '0x';
+    const hB = $('hashB').value || '0x';
+
+    // Guard
+    let guardAddr = existingGuard;
+    if(!guardAddr){
+      log(out,'Deploying AntiInversionGuard…');
+      const GF=new ethers.ContractFactory(compiled.Guard.abi, compiled.Guard.bytecode, signer);
+      const g=await GF.deploy(); await g.waitForDeployment(); guardAddr=await g.getAddress();
+    }
+    $('outGuard').textContent=guardAddr;
+
+    // Impl
+    log(out,'Deploying QuestEscrow implementation…');
+    const EF=new ethers.ContractFactory(compiled.Escrow.abi, compiled.Escrow.bytecode, signer);
+    const impl=await EF.deploy(); await impl.waitForDeployment(); const implAddr=await impl.getAddress();
+    $('outImpl').textContent=implAddr;
+
+    const code=await provider.getCode(implAddr);
+    const codeHash=ethers.keccak256(code);
+    $('outHash').textContent=codeHash;
+
+    // Allow-list impl
+    log(out,'Allow-listing impl codeHash in Guard…');
+    const guard=new ethers.Contract(guardAddr, compiled.Guard.abi, signer);
+    const txAllow=await guard.allow(key, codeHash, 'QuestEscrow impl'); await txAllow.wait();
+
+    // Initialize via proxy
+    const iface = new ethers.Interface(compiled.Escrow.abi);
+    const init = iface.encodeFunctionData('initialize', [
+      admin, guardAddr, key, hA, hB, 'sha256','blake3',
+      feeRec, feeBps,
+      ethers.parseEther(String(minBounty)),
+      ethers.parseEther(String(minStake))
+    ]);
+
+    log(out,'Deploying ERC1967Proxy (+ initialize)…');
+    const PF=new ethers.ContractFactory(compiled.Proxy.abi, compiled.Proxy.bytecode, signer);
+    const proxy=await PF.deploy(implAddr, init); await proxy.waitForDeployment();
+    const proxyAddr=await proxy.getAddress();
+
+    $('outProxy').textContent=proxyAddr; $('outKey').textContent=key; $('escAddr').value=proxyAddr;
+    log(out,`✅ Deployed\nGuard ${guardAddr}\nImpl ${implAddr}\nProxy ${proxyAddr}\ncodeHash ${codeHash}`);
+
+    // Auto-register in hub
+    try{ await autoRegisterInHub('QuestEscrow', proxyAddr, compiled.Escrow.abi); }catch{}
+
+  }catch(e){ log(out,'⛔ '+(e?.message||String(e))); }
+};
+
+/* ===== verify (quick) ===== */
+$('btnVerify').onclick=async()=>{ await doVerify($('escAddr').value || $('outProxy').textContent, $('outGuard').textContent || $('guardAddr').value, $('outKey').textContent || toBytes32($('ckey').value)); };
+$('btnVerify2').onclick=async()=>{ await doVerify($('vProxy').value,$('vGuard').value,$('vKey').value); };
+
+async function doVerify(proxy, guard, key){
+  const out=$('verifyOut');
+  try{
+    if(!provider) throw new Error('Connect wallet');
+    const IMPL_SLOT='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+    const implSlot=await provider.getStorage(proxy, IMPL_SLOT);
+    const impl='0x'+implSlot.slice(26);
+    const code=await provider.getCode(impl);
+    const h=ethers.keccak256(code);
+    const gAbi=[{"type":"function","stateMutability":"view","outputs":[{"type":"bool"}],"name":"isAllowed","inputs":[{"type":"bytes32"},{"type":"bytes32"}]}];
+    const g=new ethers.Contract(guard,gAbi,provider);
+    const ok=await g.isAllowed(key,h);
+    out.textContent=(ok?'✅ OK':'⛔ FAIL')+`\nimpl ${impl}\ncodeHash ${h}`;
+  }catch(e){ out.textContent='⛔ '+(e?.message||e); }
+}
+
+/* ===== operate ===== */
+let cached; async function abi(){ return cached||(cached=await compileAll()); }
+function roleHash(name){ return ethers.keccak256(ethers.toUtf8Bytes(name||'')); }
+async function getEsc(sign=true){
+  const A=await abi(); const addr=$('escAddr').value || $('outProxy').textContent;
+  if(!addr) throw new Error('Proxy address missing');
+  return new ethers.Contract(addr, A.Escrow.abi, sign? signer: provider);
+}
+
+$('btnPost').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const r=$('postRegion').value; const cat=$('postCat').value; const a=$('postA').value; const b=$('postB').value;
+  const val=ethers.parseEther(String($('postValue').value||'0'));
+  const tx=await c.post(r,cat,a,b,{value:val}); const rc=await tx.wait(); out.textContent='✅ Mission posted\n'+rc.hash; award({n:'MissionPosted'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnFund').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const id=BigInt($('fundId').value||'0'); const val=ethers.parseEther(String($('fundVal').value||'0'));
+  const tx=await c.fund(id,{value:val}); const rc=await tx.wait(); out.textContent='💧 Funded\n'+rc.hash; award({n:'MissionFunded'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnSubmit').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const id=BigInt($('subId').value||'0'); const a=$('subA').value; const b=$('subB').value; const stake=ethers.parseEther(String($('subStake').value||'0'));
+  const tx=await c.submit(id,a,b,{value:stake}); const rc=await tx.wait(); out.textContent='📤 Submitted (check events for subIndex)\n'+rc.hash; award({n:'Submitted'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnFinalize').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const id=BigInt($('finId').value||'0'); const s=BigInt($('finSub').value||'0'); const tx=await c.finalize(id,s); const rc=await tx.wait();
+  out.textContent='🏁 Finalized\n'+rc.hash; award({n:'Finalized'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnCancel').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const id=BigInt($('cancelId').value||'0'); const tx=await c.cancel(id); const rc=await tx.wait(); out.textContent='🛑 Canceled\n'+rc.hash; award({n:'Canceled'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnWithdraw').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const id=BigInt($('wId').value||'0'); const s=BigInt($('wSub').value||'0'); const tx=await c.withdrawStake(id,s); const rc=await tx.wait();
+  out.textContent='↩️ Stake withdrawn\n'+rc.hash; award({n:'StakeWithdrawn'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnSetFee').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const r=$('paramFeeRec').value||ethers.ZeroAddress; const b=parseInt($('paramFeeBps').value||'0',10);
+  const tx=await c.setFeeParams(r,b); const rc=await tx.wait(); out.textContent='📊 Fees set\n'+rc.hash
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnSetMin').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getEsc(); const mb=ethers.parseEther(String($('paramMinBounty').value||'0')); const ms=ethers.parseEther(String($('paramMinStake').value||'0'));
+  const tx=await c.setMinParams(mb,ms); const rc=await tx.wait(); out.textContent='🪙 Minimums set\n'+rc.hash
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnGrant').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getEsc(); const r=roleHash($('roleNameG').value); const a=$('roleAddrG').value; const tx=await c.grantRole(r,a); const rc=await tx.wait(); out.textContent='🔑 Granted\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnRevoke').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getEsc(); const r=roleHash($('roleNameR').value); const a=$('roleAddrR').value; const tx=await c.revokeRole(r,a); const rc=await tx.wait(); out.textContent='🗝️ Revoked\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnVersion').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getEsc(false); const v=await c.version(); out.textContent='version = '+v }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnReadMission').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getEsc(false); const id=BigInt($('readMid').value||'0'); const m=await c.getMission(id); out.textContent=JSON.stringify(m,null,2) }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnReadSubmission').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getEsc(false); const id=BigInt($('readSid').value||'0'); const idx=BigInt($('readSidx').value||'0'); const s=await c.getSubmission(id,idx); out.textContent=JSON.stringify(s,null,2) }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnSubCount').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getEsc(false); const id=BigInt($('readSid').value||$('readMid').value||'0'); const n=await c.submissionCount(id); out.textContent='submissionCount = '+n.toString() }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+/* ===== events + XP ===== */
+let sub;
+$('btnSubscribe').onclick=async()=>{
+  const feed=$('xpFeed'); feed.textContent='';
+  try{
+    const A=await abi(); const addr=$('escAddr').value || $('outProxy').textContent;
+    if(!addr) throw new Error('Proxy address missing');
+    if(sub){ sub.removeAllListeners?.(); sub = null; }
+    sub=new ethers.Contract(addr, A.Escrow.abi, provider);
+    const evs=['MissionPosted','MissionFunded','Submitted','Finalized','Canceled','RoleGranted','RoleRevoked','Paused','Unpaused','Upgraded'];
+    evs.forEach(name=>{
+      try{
+        sub.on(name, (...args)=>{ const evt=args.at(-1); const data=args.slice(0,-1);
+          const line = `${new Date().toLocaleTimeString()} · ${name} · ${JSON.stringify(data)}`;
+          feed.textContent = (line+'\n'+feed.textContent).slice(0,8000);
+          award({n:name});
+        });
+      }catch{}
+    });
+  }catch(e){ feed.textContent='⛔ '+(e?.message||e); }
+};
+
+let XP=0, Badges=0, Streak=0, LastDay=null;
+const XP_MAP={ MissionPosted:6, MissionFunded:3, Submitted:5, Finalized:10, Canceled:2, RoleGranted:1, RoleRevoked:1, Paused:1, Unpaused:1, Upgraded:4, StakeWithdrawn:2 };
+function award(evt){
+  const d=Math.floor(Date.now()/86400000);
+  if(LastDay===null || d>LastDay){ Streak++; LastDay=d; }
+  const pts = XP_MAP[evt.n] || 2;
+  XP += pts; if(XP%50===0) Badges++;
+  $('xpTotal').textContent=XP; $('streak').textContent=Streak; $('badges').textContent=Badges;
+}
+
+/* ===== auto-register in hub ===== */
+async function autoRegisterInHub(title,address,abi){
+  const open = indexedDB.open('PeaceGameHub', 1);
+  const db = await new Promise((res,rej)=>{
+    open.onerror=()=>rej(open.error);
+    open.onupgradeneeded=(e)=>{ const d=e.target.result; if(!d.objectStoreNames.contains('contracts')) d.createObjectStore('contracts',{keyPath:'title'}); };
+    open.onsuccess=()=>res(open.result);
+  });
+  await new Promise((res,rej)=>{
+    const tx=db.transaction('contracts','readwrite'); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+    tx.objectStore('contracts').put({title,address,abi});
+  });
+}
+
+/* ===== dual-hash quick-fill on load ===== */
+addEventListener('load',()=>{const v=$('docText').value; if(v) $('btnHash').click();});
+</script>
+</body>
+</html>

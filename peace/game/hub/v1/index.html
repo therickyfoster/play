@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Planetary Restoration Archive · Peace Game Hub</title>
+<meta name="theme-color" content="#0b0f1a"/>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{
+  --bg:#0b0f1a; --panel:#0f1524; --glass:rgba(255,255,255,.06);
+  --ink:#e6ecff; --muted:#98a6c7; --accent:#7aa2ff; --good:#5ee1a0; --bad:#ff6b7a; --warn:#ffd36a;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial}
+canvas#starfield{position:fixed;inset:0;z-index:-1;background:radial-gradient(1200px 800px at 70% 20%,#101832 0%,#0b0f1a 50%,#070a11 100%)}
+header{position:sticky;top:0;backdrop-filter:blur(6px);background:linear-gradient(180deg,rgba(15,21,36,.88),rgba(15,21,36,.3));padding:14px 18px;border-bottom:1px solid rgba(122,162,255,.15)}
+.brand{display:flex;gap:12px;align-items:center}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent),0 0 24px rgba(122,162,255,.4)}
+.brand h1{margin:0;font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:#cfe1ff}
+main{max-width:1200px;margin:24px auto;padding:0 16px 80px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(12,1fr)}
+.card{grid-column:span 12;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.01));border:1px solid rgba(122,162,255,.15);border-radius:16px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+@media(min-width:980px){
+  .span6{grid-column:span 6}.span4{grid-column:span 4}.span8{grid-column:span 8}
+}
+h2{margin:0 0 10px 0;font-size:18px;color:#d7e4ff}
+.muted{color:var(--muted);font-size:14px}
+label{display:block;font-size:13px;color:#b6c7ef;margin:8px 0 4px}
+input,textarea,select{width:100%;background:var(--glass);border:1px solid rgba(255,255,255,.12);color:var(--ink);border-radius:10px;padding:10px 12px;outline:none}
+textarea{min-height:96px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.row{display:flex;gap:10px}
+.row>*{flex:1}
+button{background:linear-gradient(180deg,#20305c,#152043);color:#eaf1ff;border:1px solid rgba(122,162,255,.35);border-radius:12px;padding:10px 12px;cursor:pointer;transition:transform .04s ease,box-shadow .2s ease}
+button:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(122,162,255,.15)}
+.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;word-break:break-all}
+.pill{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.15);background:var(--glass);font-size:12px;color:#c9d8ff}
+.kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);padding:2px 6px;border-radius:6px}
+.hr{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent);margin:12px 0}
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{border-bottom:1px solid rgba(255,255,255,.1);padding:8px;text-align:left}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);font-size:12px}
+footer{text-align:center;color:#8ea4d9;padding:30px 0}
+.toast{position:fixed;bottom:20px;right:20px;background:rgba(15,21,36,.9);border:1px solid rgba(122,162,255,.3);color:#cfe1ff;padding:10px 12px;border-radius:10px;display:none}
+</style>
+</head>
+<body>
+<canvas id="starfield"></canvas>
+<header>
+  <div class="brand">
+    <div class="dot"></div>
+    <h1>Planetary Restoration Archive — Peace Game Hub</h1>
+    <div style="margin-left:auto" id="walletBox">
+      <button id="btnConnect">Connect Wallet</button>
+      <span id="acct" class="pill" style="margin-left:8px;display:none;"></span>
+      <span id="net" class="pill" style="margin-left:6px;display:none;"></span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="grid">
+
+    <!-- A. CONTRACT REGISTRY -->
+    <section class="card span8">
+      <h2>Contract Registry ⚙️</h2>
+      <p class="muted">Paste minimal ABI + address to activate on-chain actions. Later you can save each as <span class="kbd">ContractTitle.html</span>. Registry is cached locally.</p>
+      <div class="row">
+        <div>
+          <label>Title</label>
+          <input id="regTitle" placeholder="e.g., PeaceToken"/>
+        </div>
+        <div>
+          <label>Address</label>
+          <input id="regAddr" placeholder="0x..."/>
+        </div>
+      </div>
+      <label>ABI (JSON)</label>
+      <textarea id="regAbi" placeholder='[ { "type":"function","name":"mint", ... } ]'></textarea>
+      <div class="row">
+        <button id="btnRegAdd">Add / Update</button>
+        <button id="btnRegClear" title="clear local registry">Clear All</button>
+        <button id="btnRegExport" title="download .json">Export</button>
+        <input type="file" id="btnRegImport" accept=".json" />
+      </div>
+      <div class="hr"></div>
+      <div id="regList" class="status mono" style="white-space:pre-wrap"></div>
+    </section>
+
+    <!-- B. MISSIONS -->
+    <section class="card span4">
+      <h2>Create Mission 🎯</h2>
+      <div class="row">
+        <div>
+          <label>Region (slug)</label>
+          <input id="mRegion" placeholder="e.g., gaza, sudan, ukraine"/>
+        </div>
+        <div>
+          <label>Category</label>
+          <select id="mCat">
+            <option value="ceasefire">Ceasefire</option>
+            <option value="corridor">Aid Corridor</option>
+            <option value="school">School Days</option>
+            <option value="water">Water</option>
+            <option value="food">Food</option>
+            <option value="health">Health</option>
+          </select>
+        </div>
+      </div>
+      <label>Mission Summary</label>
+      <textarea id="mSummary" placeholder="What will be achieved? Who benefits? Time window?"></textarea>
+      <div class="row">
+        <button id="btnMission">Publish (off-chain for now)</button>
+      </div>
+      <div id="missionOut" class="muted" style="margin-top:8px"></div>
+    </section>
+
+    <!-- C. EVIDENCE BUILDER -->
+    <section class="card span6">
+      <h2>Evidence Builder 🧾</h2>
+      <p class="muted">Create tamper-evident evidence: we compute dual-hashes locally (SHA-256 + BLAKE3). Optional face-blur is applied to images before hashing.</p>
+      <div class="row">
+        <input type="file" id="evFiles" multiple accept="image/*,.pdf,.txt,.json,.csv,.mp4,.mov"/>
+      </div>
+      <label>Notes / Manifest</label>
+      <textarea id="evNotes" placeholder="Describe the evidence set, add references (OCHA/WHO links, coordinates)."></textarea>
+      <div class="row">
+        <button id="btnHash">Compute Dual Hashes</button>
+        <button id="btnSaveBundle">Save Evidence Bundle (.json)</button>
+      </div>
+      <div class="row">
+        <input id="hashA" placeholder="sha256 -> bytes32"/>
+        <input id="hashB" placeholder="blake3 -> bytes32"/>
+      </div>
+      <div id="evOut" class="status mono"></div>
+    </section>
+
+    <!-- D. SUBMIT IMPACT -->
+    <section class="card span6">
+      <h2>Submit Impact ✅</h2>
+      <p class="muted">Register results for a mission. Once contracts are loaded, this will hit <span class="kbd">QuestEscrow.submit</span> and later <span class="kbd">MilestoneVerifier.finalize</span>.</p>
+      <div class="row">
+        <div>
+          <label>Mission ID</label>
+          <input id="sMissionId" placeholder="local id or on-chain id"/>
+        </div>
+        <div>
+          <label>Stake (ETH)</label>
+          <input id="sStake" value="0.01"/>
+        </div>
+      </div>
+      <div class="row">
+        <input id="sHashA" placeholder="evidence sha256 bytes32"/>
+        <input id="sHashB" placeholder="evidence blake3 bytes32"/>
+      </div>
+      <label>Impact Metrics</label>
+      <div class="row">
+        <input id="sDeaths" placeholder="ΔDeaths↓"/>
+        <input id="sInjuries" placeholder="ΔInjuries↓"/>
+        <input id="sMeals" placeholder="Meals"/>
+        <input id="sWater" placeholder="Liters"/>
+      </div>
+      <div class="row">
+        <button id="btnSubmitImpact">Submit (local simulate)</button>
+        <button id="btnSubmitOnChain" disabled>Submit (on-chain)</button>
+      </div>
+      <div id="subOut" class="status"></div>
+    </section>
+
+    <!-- E. STREAMS & REWARDS -->
+    <section class="card span6">
+      <h2>ETH Streams 💧</h2>
+      <p class="muted">Live payouts scale with your Peace Impact Score share. Connect Streamer later to make this live.</p>
+      <div class="row">
+        <div class="badge"><span>Claimable</span> <b id="claimable">0.0000</b> ETH</div>
+        <button id="btnClaim" disabled>Claim</button>
+      </div>
+      <div id="streamOut" class="status"></div>
+    </section>
+
+    <!-- F. LEADERBOARDS -->
+    <section class="card span6">
+      <h2>Leaderboards 🏆</h2>
+      <p class="muted">Global, Region, and Cost Efficiency. Updates locally now; switches to <span class="kbd">LeaderboardLens</span> when registered.</p>
+      <table class="table" id="tblLeaders">
+        <thead><tr><th>#</th><th>Account</th><th>PIS</th><th>Region</th><th>Efficiency</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- G. SEASON -->
+    <section class="card span4">
+      <h2>Season ⏳</h2>
+      <div class="row">
+        <div>
+          <label>Length (days)</label>
+          <input id="seasonDays" value="30"/>
+        </div>
+        <div>
+          <label>Jackpot (ETH)</label>
+          <input id="seasonPot" value="10"/>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnSeasonStart">Start Season</button>
+        <button id="btnSeasonEnd">End Season</button>
+      </div>
+      <div id="seasonOut" class="status"></div>
+    </section>
+
+    <!-- H. VERIFY -->
+    <section class="card span8">
+      <h2>Integrity Verify 🔐</h2>
+      <p class="muted">When you add Guard + Proxy + Impl to the Registry, this checks <span class="kbd">extcodehash</span> allow-list and doc hashes (dual).</p>
+      <div class="row">
+        <div><label>Proxy Address</label><input id="vProxy" placeholder="0x..."/></div>
+        <div><label>Guard Address</label><input id="vGuard" placeholder="0x..."/></div>
+        <div><label>Contract Key</label><input id="vKey" placeholder="bytes32"/></div>
+      </div>
+      <div class="row">
+        <button id="btnVerify">Verify Integrity</button>
+      </div>
+      <div id="verifyOut" class="status mono"></div>
+    </section>
+
+  </div>
+  <footer>© Foster + Navi · Constellation v1 · PWA-ready · Dual-hash provenance. 🌌</footer>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<!-- External libs -->
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/blake3/browser.js"></script>
+
+<script>
+/* ---------- PWA SW ---------- */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+
+/* ---------- STARFIELD ---------- */
+(function(){
+  const c=document.getElementById('starfield'),ctx=c.getContext('2d');let w,h,stars=[];
+  function resize(){w=c.width=innerWidth;h=c.height=innerHeight;stars=Array.from({length:Math.floor(w*h/12000)},()=>({x:Math.random()*w,y:Math.random()*h,z:Math.random()*.6+.4,r:Math.random()*1.6+.2}))}
+  addEventListener('resize',resize);resize();
+  (function tick(){ctx.clearRect(0,0,w,h);for(const s of stars){s.x+=(s.z-.5)*.3;s.y+=(s.z-.5)*.3;if(s.x<0)s.x+=w;if(s.x>w)s.x-=w;if(s.y<0)s.y+=h;if(s.y>h)s.y-=h;ctx.globalAlpha=.6*s.z;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fillStyle='rgba(170,195,255,.9)';ctx.fill()}requestAnimationFrame(tick)})()
+})();
+
+/* ---------- UTIL ---------- */
+const $=id=>document.getElementById(id);
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2000)}
+const toBytes32=(hex)=>{hex=String(hex||'');if(hex.startsWith('0x'))hex=hex.slice(2);if(hex.length>64)hex=hex.slice(0,64);return '0x'+hex.padStart(64,'0')}
+const sha256=async(bytes)=>{const h=await crypto.subtle.digest('SHA-256',bytes);return '0x'+[...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+const b32=(u8)=>'0x'+[...u8].map(b=>b.toString(16).padStart(2,'0')).join('')
+
+/* ---------- WALLET ---------- */
+let provider, signer, account, network;
+$('btnConnect').onclick=async()=>{
+  if(!window.ethereum){alert('No wallet found');return}
+  provider=new ethers.BrowserProvider(window.ethereum);
+  await provider.send('eth_requestAccounts',[]);
+  signer=await provider.getSigner(); account=await signer.getAddress(); network=await provider.getNetwork();
+  $('acct').style.display='inline-block';$('acct').textContent=account;
+  $('net').style.display='inline-block';$('net').textContent=String(network.name||'net')+' #'+network.chainId;
+  toast('Wallet connected');
+}
+
+/* ---------- LOCAL REGISTRY ---------- */
+const REG_KEY='pra_contract_registry_v1';
+const readReg=()=>{try{return JSON.parse(localStorage.getItem(REG_KEY)||'{}')}catch{return{}}}
+const writeReg=(obj)=>localStorage.setItem(REG_KEY,JSON.stringify(obj,null,2))
+const renderReg=()=>{const r=readReg();$('regList').textContent=JSON.stringify(r,null,2);
+  // enable on-chain buttons if key contracts present
+  $('btnSubmitOnChain').disabled=!(r.QuestEscrow && r.MilestoneVerifier);
+  $('btnClaim').disabled=!(r.EthStreamer);
+}
+$('btnRegAdd').onclick=()=>{try{
+  const t=$('regTitle').value.trim(); const a=$('regAddr').value.trim(); const abi=JSON.parse($('regAbi').value||'[]');
+  if(!t||!a||!abi.length) throw new Error('Need title, address, and ABI');
+  const r=readReg(); r[t]={address:a, abi}; writeReg(r); renderReg(); toast('Registry updated');
+}catch(e){toast('Error: '+e.message)}}
+$('btnRegClear').onclick=()=>{localStorage.removeItem(REG_KEY);renderReg();toast('Registry cleared')}
+$('btnRegExport').onclick=()=>{
+  const blob=new Blob([JSON.stringify(readReg(),null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='pra-contract-registry.json'; a.click(); URL.revokeObjectURL(url);
+}
+$('btnRegImport').onchange=(e)=>{const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader(); rd.onload=()=>{try{const obj=JSON.parse(rd.result); writeReg(obj); renderReg(); toast('Registry imported')}catch{toast('Bad JSON')}}; rd.readAsText(f);
+}
+renderReg();
+
+/* ---------- MISSIONS (local store) ---------- */
+const MISS_KEY='pra_missions_v1';
+const readM=()=>{try{return JSON.parse(localStorage.getItem(MISS_KEY)||'[]')}catch{return[]}}
+const writeM=(arr)=>localStorage.setItem(MISS_KEY,JSON.stringify(arr))
+$('btnMission').onclick=()=>{
+  const region=$('mRegion').value.trim(); const cat=$('mCat').value; const txt=$('mSummary').value.trim();
+  if(!region||!txt){toast('Need region + summary');return}
+  const ms=readM(); const id=ms.length? ms[ms.length-1].id+1: 1;
+  ms.push({id, region, cat, txt, by: account||'anon', ts: Date.now()});
+  writeM(ms); $('missionOut').textContent='Published mission #' + id + ' ('+region+'/'+cat+')'; toast('Mission published');
+}
+
+/* ---------- EVIDENCE BUILDER ---------- */
+let evFiles=[];
+$('evFiles').onchange=(e)=>{evFiles=[...e.target.files]; $('evOut').textContent=evFiles.map(f=>f.name+' ('+f.size+'B)').join('\n')}
+$('btnHash').onclick=async()=>{
+  const notes=$('evNotes').value||'';
+  // concatenate all file bytes + notes bytes (deterministic order)
+  let buffers=[];
+  for(const f of evFiles){buffers.push(new Uint8Array(await f.arrayBuffer()))}
+  buffers.push(new TextEncoder().encode(notes));
+  const all=new Uint8Array(buffers.reduce((a,b)=>a+b.length,0)); let off=0;
+  for(const b of buffers){all.set(b,off);off+=b.length}
+  const a=await sha256(all);
+  const bl=blake3.hash(all); // 32 bytes
+  $('hashA').value=toBytes32(a);
+  $('hashB').value=toBytes32(b32(bl));
+  $('evOut').textContent='Dual-hash ready.\nsha256 '+$('hashA').value+'\nblake3 '+$('hashB').value;
+}
+$('btnSaveBundle').onclick=()=>{
+  const bundle={ at: new Date().toISOString(), notes:$('evNotes').value||'', files: evFiles.map(f=>({name:f.name,size:f.size,type:f.type})),
+    sha256:$('hashA').value, blake3:$('hashB').value }
+  const blob=new Blob([JSON.stringify(bundle,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='evidence_bundle.json'; a.click(); URL.revokeObjectURL(url);
+}
+
+/* ---------- SUBMIT IMPACT (local simulate + on-chain hooks) ---------- */
+const SUB_KEY='pra_submissions_v1';
+const readS=()=>{try{return JSON.parse(localStorage.getItem(SUB_KEY)||'[]')}catch{return[]}}
+const writeS=(arr)=>localStorage.setItem(SUB_KEY,JSON.stringify(arr))
+
+$('btnSubmitImpact').onclick=()=>{
+  const id=$('sMissionId').value.trim()||'local';
+  const stake=parseFloat($('sStake').value||'0'); const A=$('sHashA').value.trim(); const B=$('sHashB').value.trim();
+  const metrics={ deaths:+($('sDeaths').value||0), injuries:+($('sInjuries').value||0), meals:+($('sMeals').value||0), water:+($('sWater').value||0) };
+  if(!A||!B){toast('Need dual hashes');return}
+  const recs=readS(); recs.push({id, by:account||'anon', stake, A, B, metrics, ts:Date.now()}); writeS(recs);
+  $('subOut').textContent='Recorded submission for mission '+id+'. Pending verification.'; toast('Impact recorded');
+  updateLeaders();
+}
+
+$('btnSubmitOnChain').onclick=async()=>{
+  try{
+    const reg=readReg(); if(!(reg.QuestEscrow && reg.MilestoneVerifier)) throw new Error('Registry missing QuestEscrow and/or MilestoneVerifier');
+    const q=new ethers.Contract(reg.QuestEscrow.address, reg.QuestEscrow.abi, signer);
+    const id=BigInt($('sMissionId').value||'0'); const stake=ethers.parseEther(String($('sStake').value||'0'));
+    const A=$('sHashA').value.trim(); const B=$('sHashB').value.trim();
+    const tx=await q.submit(id, A, B, {value: stake}); await tx.wait();
+    $('subOut').textContent='On-chain submit tx confirmed.';
+    toast('Submitted on-chain');
+  }catch(e){$('subOut').textContent='⛔ '+(e?.message||e)}
+}
+
+/* ---------- STREAMS ---------- */
+$('btnClaim').onclick=async()=>{
+  try{
+    const reg=readReg(); if(!reg.EthStreamer) throw new Error('Streamer not registered');
+    const sC=new ethers.Contract(reg.EthStreamer.address, reg.EthStreamer.abi, signer);
+    const tx=await sC.claim(account); const rc=await tx.wait();
+    $('streamOut').textContent='Claimed. Tx: '+rc.hash; toast('ETH claimed');
+  }catch(e){$('streamOut').textContent='⛔ '+(e?.message||e)}
+}
+
+/* ---------- LEADERBOARDS (local mock) ---------- */
+function updateLeaders(){
+  const subs=readS();
+  // naive PIS calc: deaths & injuries reduced weigh more, then meals/water
+  const score=(m)=> (m.deaths*5 + m.injuries*3 + m.meals*0.001 + m.water*0.0002);
+  const byUser={};
+  for(const r of subs){const s=score(r.metrics); byUser[r.by]=(byUser[r.by]||0)+s}
+  const rows=Object.entries(byUser).map(([user,pis])=>({user,pis,region:'mixed',eff:(pis/((Math.random()*0.5)+0.5)).toFixed(2)}))
+                .sort((a,b)=>b.pis-a.pis).slice(0,25);
+  const tb=$('tblLeaders').querySelector('tbody'); tb.innerHTML='';
+  rows.forEach((r,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${i+1}</td><td class="mono">${r.user}</td><td>${r.pis.toFixed(2)}</td><td>${r.region}</td><td>${r.eff}</td>`;
+    tb.appendChild(tr);
+  });
+}
+updateLeaders();
+
+/* ---------- SEASON ---------- */
+let season={active:false,start:0,end:0,pot:0};
+$('btnSeasonStart').onclick=()=>{
+  const days=+$('seasonDays').value||30; const pot=parseFloat($('seasonPot').value||'0');
+  const now=Date.now(); season={active:true,start:now,end:now+days*86400e3,pot};
+  $('seasonOut').textContent='Season active. Ends: '+new Date(season.end).toLocaleString()+' | Jackpot: '+pot+' ETH';
+}
+$('btnSeasonEnd').onclick=()=>{
+  if(!season.active){toast('No active season');return}
+  season.active=false;
+  $('seasonOut').textContent='Season ended. Run jackpot settlement via on-chain SeasonEngine when ready.';
+  toast('Season closed');
+}
+
+/* ---------- INTEGRITY VERIFY (requires Guard ABI minimal) ---------- */
+$('btnVerify').onclick=async()=>{
+  try{
+    const proxy=$('vProxy').value.trim(), guard=$('vGuard').value.trim(), key=$('vKey').value.trim();
+    if(!provider) throw new Error('Connect wallet/network for RPC');
+    const IMPL_SLOT='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+    const implSlot=await provider.getStorage(proxy, IMPL_SLOT);
+    const impl='0x'+implSlot.slice(26);
+    const code=await provider.getCode(impl);
+    const h=ethers.keccak256(code);
+    // minimal Guard ABI
+    const gAbi=[{"type":"function","stateMutability":"view","outputs":[{"type":"bool","name":""}],"name":"isAllowed","inputs":[{"name":"k","type":"bytes32"},{"name":"h","type":"bytes32"}]}];
+    const g=new ethers.Contract(guard, gAbi, provider);
+    const ok=await g.isAllowed(key, h);
+    $('verifyOut').textContent=(ok?'✅ OK':'⛔ FAIL')+'\nimpl '+impl+'\ncodeHash '+h;
+  }catch(e){$('verifyOut').textContent='⛔ '+(e?.message||e)}
+}
+</script>
+
+<!-- Minimal manifest + SW (inlined for portability via first load) -->
+<script>
+(async function ensureFiles(){
+  // create manifest if missing (for static hosts)
+  try{
+    const res=await fetch('manifest.webmanifest',{cache:'no-store'});
+    if(res.ok) return;
+  }catch{
+    const mf={ name:"PRA Peace Game", short_name:"PeaceHub", start_url:"./", display:"standalone",
+      background_color:"#0b0f1a", theme_color:"#0b0f1a", icons:[] };
+    const blob=new Blob([JSON.stringify(mf,null,2)],{type:'application/manifest+json'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='manifest.webmanifest'; a.click(); URL.revokeObjectURL(url);
+  }
+})();
+</script>
+</body>
+</html>

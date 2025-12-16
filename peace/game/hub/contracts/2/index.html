@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Contract #2 — ReputationSBT (Pro) · Integrity-Guarded</title>
+<meta name="theme-color" content="#0b0f1a"/>
+<style>
+:root{
+  --bg:#0b0f1a; --panel:#0f1524; --glass:rgba(255,255,255,.06);
+  --ink:#e6ecff; --muted:#98a6c7; --accent:#7aa2ff; --good:#5ee1a0; --bad:#ff6b7a; --warn:#ffd36a;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu}
+canvas#bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(1200px 800px at 70% 20%,#101832 0%,#0b0f1a 50%,#070a11 100%)}
+main{max-width:1200px;margin:24px auto 90px;padding:0 16px}
+.card{background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.01));border:1px solid rgba(122,162,255,.16);border-radius:16px;padding:18px;box-shadow:0 10px 34px rgba(0,0,0,.28);margin-bottom:14px}
+h1{font-size:18px;letter-spacing:.08em;text-transform:uppercase;color:#cfe1ff;margin:4px 0 8px}
+h2{font-size:16px;margin:0 0 8px;color:#d9e6ff}
+.muted{color:var(--muted);font-size:14px}
+label{display:block;font-size:13px;color:#b6c7ef;margin:10px 0 4px}
+input,textarea,select{width:100%;background:var(--glass);border:1px solid rgba(255,255,255,.12);color:var(--ink);border-radius:10px;padding:10px 12px;outline:none}
+textarea{min-height:88px;font-family:ui-monospace,Consolas,Menlo,monospace}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:200px}
+button{background:linear-gradient(180deg,#20305c,#152043);color:#eaf1ff;border:1px solid rgba(122,162,255,.35);border-radius:12px;padding:10px 12px;cursor:pointer;transition:transform .04s ease,box-shadow .2s ease;white-space:nowrap}
+button:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(122,162,255,.18)}
+.pill{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:var(--glass);font-size:12px}
+.hr{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.18),transparent);margin:12px 0}
+.status{font-size:13px;color:#b7c8ef;white-space:pre-wrap}
+.mono{font-family:ui-monospace,Consolas,Menlo,monospace;word-break:break-all}
+.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+#xpFeed{max-height:180px;overflow:auto}
+footer{color:#8ea4d9;text-align:center;margin-top:22px}
+.small{font-size:12px;color:#93a4d7}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<main>
+
+  <div class="card">
+    <h1>Contract #2 · ReputationSBT (Pro)</h1>
+    <div class="muted">
+      Soulbound reputation + badges for verified impact — with <b>Anti‑Inversion Guard</b>, dual‑hash provenance (SHA‑256 + BLAKE3), and fail‑closed upgrades.
+      <br/>Connect your wallet to compile, deploy, allow‑list, and initialize via minimal ERC1967 proxy.
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnConnect">Connect Wallet</button>
+      <span id="acct" class="pill" style="display:none"></span>
+      <span id="net" class="pill" style="display:none"></span>
+    </div>
+  </div>
+
+  <!-- Deploy -->
+  <div class="card">
+    <h2>Deploy Suite · Guard → Impl → Allow → Proxy+Initialize</h2>
+    <div class="row">
+      <div><label>Admin (DAO/Timelock)</label><input id="admin" placeholder="0x… (defaults to connected)"/></div>
+      <div><label>Existing Guard (optional)</label><input id="guardAddr" placeholder="0x… (leave empty to deploy new)"/></div>
+    </div>
+    <div class="row">
+      <div><label>Contract Key (bytes32)</label><input id="ckey" placeholder="keccak256('ReputationSBT@pro')"/></div>
+      <div><label>Half‑Life (days)</label><input id="decayDays" value="30"/></div>
+      <div><label>Base URI</label><input id="baseURI" placeholder="ipfs://cid/ or https://…"/></div>
+    </div>
+    <label>Canonical Spec / Audit Text (for dual‑hash provenance)</label>
+    <textarea id="docText" placeholder="Paste canonical README/audit text or CID. We'll hash it."></textarea>
+    <div class="row">
+      <div><label>sha256 → bytes32</label><input id="hashA" placeholder="0x…" /></div>
+      <div><label>blake3 → bytes32</label><input id="hashB" placeholder="0x…" /></div>
+    </div>
+    <div class="row">
+      <button id="btnHash">Compute Dual Hashes</button>
+      <button id="btnDeploy">Deploy All</button>
+      <button id="btnVerify">Verify Integrity</button>
+    </div>
+    <div class="hr"></div>
+    <div class="status mono" id="deployOut">—</div>
+    <div class="small">Tip: If using an existing Guard, ensure you’re its <b>owner</b> to allow‑list the impl codehash.</div>
+  </div>
+
+  <!-- Addresses -->
+  <div class="card">
+    <h2>Addresses & Hashes</h2>
+    <div><b>Guard:</b> <span id="outGuard" class="mono">—</span></div>
+    <div><b>ReputationSBT Impl:</b> <span id="outImpl" class="mono">—</span></div>
+    <div><b>Impl codeHash:</b> <span id="outHash" class="mono">—</span></div>
+    <div><b>Proxy (SBT):</b> <span id="outProxy" class="mono">—</span></div>
+    <div><b>ContractKey:</b> <span id="outKey" class="mono">—</span></div>
+    <div><b>Doc A/B:</b> <span id="outDoc" class="mono">—</span></div>
+    <div class="small">Auto‑registers this ABI+address in your hub under title <b>ReputationSBT</b>.</div>
+  </div>
+
+  <!-- Ops -->
+  <div class="card">
+    <h2>Operate ReputationSBT</h2>
+    <div class="row"><input id="sbtAddr" placeholder="Proxy address (auto‑filled)" /></div>
+
+    <h3 class="small">Issue / Slash / Revoke</h3>
+    <div class="row">
+      <div><label>Issue: to</label><input id="issueTo" placeholder="0x…"/></div>
+      <div><label>Issue: amount</label><input id="issueAmt" placeholder="1000"/></div>
+      <div><label>Issue: tokenURI</label><input id="issueURI" placeholder="ipfs://… (optional)"/></div>
+      <div style="align-self:end"><button id="btnIssue">Issue</button></div>
+    </div>
+    <div class="row">
+      <div><label>Slash: from</label><input id="slashFrom" placeholder="0x…"/></div>
+      <div><label>Slash: amount</label><input id="slashAmt" placeholder="250"/></div>
+      <div><label>Slash: reason</label><input id="slashReason" placeholder="penalty"/></div>
+      <div style="align-self:end"><button id="btnSlash">Slash</button></div>
+    </div>
+    <div class="row">
+      <div><label>Revoke: tokenId</label><input id="revokeId" placeholder="uint256"/></div>
+      <div style="align-self:end"><button id="btnRevoke">Revoke Badge</button></div>
+    </div>
+
+    <h3 class="small">Batch (JSON arrays)</h3>
+    <div class="row">
+      <textarea id="batchTo" placeholder='["0xabc…","0xdef…"]'></textarea>
+      <textarea id="batchAmt" placeholder='[100,200]'></textarea>
+      <textarea id="batchURI" placeholder='["ipfs://…","ipfs://…"]'></textarea>
+    </div>
+    <div class="row">
+      <button id="btnBatchIssue">Batch Issue</button>
+      <textarea id="batchFrom" placeholder='["0xabc…","0xdef…"]'></textarea>
+      <textarea id="batchSlashAmt" placeholder='[10,20]'></textarea>
+      <textarea id="batchReason" placeholder='["late","fraud"]'></textarea>
+      <button id="btnBatchSlash">Batch Slash</button>
+    </div>
+
+    <h3 class="small">Admin & Params</h3>
+    <div class="row">
+      <div><label>Set Base URI</label><input id="paramBase" placeholder="ipfs://cid/"/></div>
+      <div style="align-self:end"><button id="btnSetBase">Set BaseURI</button></div>
+      <div><label>Set Half‑Life (days)</label><input id="paramHalf" placeholder="45"/></div>
+      <div style="align-self:end"><button id="btnSetHalf">Set Decay</button></div>
+    </div>
+
+    <div class="row">
+      <div><label>Doc Hash A (sha256)</label><input id="paramA" placeholder="0x…"/></div>
+      <div><label>Doc Hash B (blake3)</label><input id="paramB" placeholder="0x…"/></div>
+      <div><label>Label A</label><input id="paramLA" value="sha256"/></div>
+      <div><label>Label B</label><input id="paramLB" value="blake3"/></div>
+      <div style="align-self:end"><button id="btnSetDocs">Set Document Hashes</button></div>
+    </div>
+
+    <div class="row">
+      <div><label>Grant Role (name)</label><input id="roleNameG" placeholder="ISSUER_ROLE"/></div>
+      <div><label>to</label><input id="roleAddrG" placeholder="0x…"/></div>
+      <div style="align-self:end"><button id="btnGrant">Grant</button></div>
+    </div>
+    <div class="row">
+      <div><label>Revoke Role (name)</label><input id="roleNameR" placeholder="SLASH_ROLE"/></div>
+      <div><label>from</label><input id="roleAddrR" placeholder="0x…"/></div>
+      <div style="align-self:end"><button id="btnRevoke">Revoke</button></div>
+    </div>
+    <div class="row">
+      <div><label>Renounce Role (name)</label><input id="roleNameX" placeholder="PAUSER_ROLE"/></div>
+      <div style="align-self:end"><button id="btnRenounce">Renounce</button></div>
+      <div><label>Pause / Unpause</label></div>
+      <div style="align-self:end"><button id="btnPause">Pause</button></div>
+      <div style="align-self:end"><button id="btnUnpause">Unpause</button></div>
+    </div>
+
+    <h3 class="small">Reads</h3>
+    <div class="row">
+      <div><label>reputationOf(addr)</label><input id="readAddr" placeholder="0x…"/></div>
+      <div style="align-self:end"><button id="btnReadRep">Read</button></div>
+      <div><label>tokenURI(id)</label><input id="readId" placeholder="uint256"/></div>
+      <div style="align-self:end"><button id="btnReadURI">Read</button></div>
+    </div>
+    <div class="row">
+      <div style="align-self:end"><button id="btnTotalIssued">totalIssued()</button></div>
+      <div style="align-self:end"><button id="btnActiveSupply">activeSupply()</button></div>
+      <div><label>balanceActive(addr)</label><input id="readBalAddr" placeholder="0x…"/></div>
+      <div style="align-self:end"><button id="btnReadBal">Read</button></div>
+    </div>
+    <div class="row">
+      <div><label>hasRole(role, account)</label><input id="readRole" placeholder="ISSUER_ROLE"/></div>
+      <div><label>account</label><input id="readRoleAddr" placeholder="0x…"/></div>
+      <div style="align-self:end"><button id="btnHasRole">Check</button></div>
+      <div style="align-self:end"><button id="btnVersion">version()</button></div>
+    </div>
+
+    <div class="hr"></div>
+    <div class="status mono" id="opsOut">—</div>
+  </div>
+
+  <!-- Events + XP -->
+  <div class="card">
+    <h2>Live Events & XP</h2>
+    <div class="row">
+      <div class="pill">XP <b id="xpTotal">0</b></div>
+      <div class="pill">Streak <b id="streak">0</b>d</div>
+      <div class="pill">Badges <b id="badges">0</b></div>
+      <button id="btnSubscribe">Subscribe Events</button>
+    </div>
+    <div id="xpFeed" class="status mono"></div>
+  </div>
+
+  <!-- Integrity Verify -->
+  <div class="card">
+    <h2>Integrity Verify</h2>
+    <div class="row">
+      <div><label>Proxy Address</label><input id="vProxy" placeholder="0x…"/></div>
+      <div><label>Guard Address</label><input id="vGuard" placeholder="0x…"/></div>
+      <div><label>Contract Key</label><input id="vKey" placeholder="bytes32"/></div>
+    </div>
+    <div class="row">
+      <button id="btnVerify2">Verify</button>
+    </div>
+    <div class="status mono" id="verifyOut">—</div>
+  </div>
+
+  <footer>© Constellation microconsole · Integrity‑first · Dual‑hash provenance. </footer>
+</main>
+
+<!-- libs -->
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.min.js"></script>
+<script src="https://binaries.soliditylang.org/bin/soljson-v0.8.24+commit.e11b9ed9.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/blake3/browser.js"></script>
+
+<script>
+/* ===== background ===== */
+(function(){const c=document.getElementById('bg'),x=c.getContext('2d');let w,h,S=[];
+function rs(){w=c.width=innerWidth;h=c.height=innerHeight;S=Array.from({length:Math.floor(w*h/13000)},()=>({x:Math.random()*w,y:Math.random()*h,z:Math.random()*.6+.4,r:Math.random()*1.6+.2}))}
+addEventListener('resize',rs);rs();(function t(){x.clearRect(0,0,w,h);for(const s of S){s.x+=(s.z-.5)*.3;s.y+=(s.z-.5)*.3;if(s.x<0)s.x+=w;if(s.x>w)s.x-=w;if(s.y<0)s.y+=h;if(s.y>h)s.y-=h;x.globalAlpha=.6*s.z;x.beginPath();x.arc(s.x,s.y,s.r,0,Math.PI*2);x.fillStyle='rgba(170,195,255,.9)';x.fill()}requestAnimationFrame(t)})()})();
+
+/* ===== wallet ===== */
+let provider, signer, account, network;
+const $=id=>document.getElementById(id);
+$('btnConnect').onclick=async()=>{
+  if(!window.ethereum){alert('No wallet');return}
+  provider=new ethers.BrowserProvider(window.ethereum);
+  await provider.send('eth_requestAccounts',[]);
+  signer=await provider.getSigner(); account=await signer.getAddress(); network=await provider.getNetwork();
+  $('acct').style.display='inline-block';$('acct').textContent=account;
+  $('net').style.display='inline-block';$('net').textContent=(network.name||'net')+' #'+network.chainId;
+};
+
+/* ===== utils ===== */
+const toBytes32=(hex)=>{hex=String(hex||'');if(hex.startsWith('0x'))hex=hex.slice(2);if(hex.length>64)hex=hex.slice(0,64);return '0x'+hex.padStart(64,'0')}
+const sha256=async(bytes)=>{const h=await crypto.subtle.digest('SHA-256',bytes);return '0x'+[...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+function log(el,msg){el.textContent=msg}
+
+/* ===== Solidity sources ===== */
+const SRC={
+  Ownable: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+contract Ownable {
+  event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+  address public owner;
+  constructor(){ owner = msg.sender; emit OwnershipTransferred(address(0), msg.sender); }
+  modifier onlyOwner(){ require(msg.sender==owner, "OWN"); _; }
+  function transferOwnership(address n) public onlyOwner { require(n!=address(0),"0"); emit OwnershipTransferred(owner,n); owner=n; }
+}
+`,
+  IAnti: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+interface IAntiInversionGuard {
+  function isAllowed(bytes32 contractKey, bytes32 codeHash) external view returns(bool);
+  function allow(bytes32 contractKey, bytes32 codeHash, string calldata meta) external;
+  function revoke(bytes32 contractKey, bytes32 codeHash) external;
+}
+`,
+  Guard: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import "./Ownable.sol";
+import "./IAntiInversionGuard.sol";
+contract AntiInversionGuard is IAntiInversionGuard, Ownable {
+  mapping(bytes32=>mapping(bytes32=>bool)) private allowed;
+  event AllowCodeHash(bytes32 indexed contractKey, bytes32 indexed codeHash, string meta);
+  event RevokeCodeHash(bytes32 indexed contractKey, bytes32 indexed codeHash);
+  function isAllowed(bytes32 k, bytes32 h) external view returns(bool){ return allowed[k][h]; }
+  function allow(bytes32 k, bytes32 h, string calldata meta) external onlyOwner { allowed[k][h]=true; emit AllowCodeHash(k,h,meta); }
+  function revoke(bytes32 k, bytes32 h) external onlyOwner { allowed[k][h]=false; emit RevokeCodeHash(k,h); }
+}
+`,
+  Guarded: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import "./IAntiInversionGuard.sol";
+abstract contract IntegrityGuarded {
+  bytes32 private constant _IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+  IAntiInversionGuard public integrityGuard;
+  bytes32 public contractKey;
+  bytes32 public docHashA; bytes32 public docHashB;
+  string  public docLabelA; string public docLabelB;
+  event IntegrityGuardSet(address indexed guard, bytes32 indexed key);
+  event DocumentHashesSet(bytes32 docA, bytes32 docB, string la, string lb);
+  function _integrityInit(address guard_, bytes32 key_, bytes32 a, bytes32 b, string memory la, string memory lb) internal {
+    require(guard_!=address(0),"guard=0");
+    integrityGuard = IAntiInversionGuard(guard_); contractKey = key_;
+    docHashA=a; docHashB=b; docLabelA=la; docLabelB=lb;
+    emit IntegrityGuardSet(guard_, key_); emit DocumentHashesSet(a,b,la,lb);
+    _assertIntegrity();
+  }
+  function _impl() internal view returns(address impl){ bytes32 slot=_IMPL_SLOT; assembly{ impl := sload(slot) } }
+  function _assertIntegrity() internal view {
+    address impl = _impl(); require(impl!=address(0),"impl=0");
+    bytes32 h; assembly{ h := extcodehash(impl) }
+    require(integrityGuard.isAllowed(contractKey, h), "INTEGRITY");
+  }
+  modifier ensureIntegrity(){ _assertIntegrity(); _; }
+}
+`,
+  SBT: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import "./IntegrityGuarded.sol";
+
+/**
+ * @title ReputationSBT (Pro)
+ * @notice Soulbound reputation + badges for verified impact. Integrity-guarded (UUPS-style).
+ */
+contract ReputationSBT is IntegrityGuarded {
+  // Errors
+  error Unauthorized(); error Paused(); error ZeroAddress(); error ZeroAmount(); error NoToken(); error AlreadyRevoked(); error LengthMismatch();
+
+  // Roles & Pause
+  bytes32 public constant ADMIN_ROLE  = keccak256("ADMIN_ROLE");
+  bytes32 public constant ISSUER_ROLE = keccak256("ISSUER_ROLE");
+  bytes32 public constant SLASH_ROLE  = keccak256("SLASH_ROLE");
+  bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+  mapping(bytes32=>mapping(address=>bool)) private roles;
+  bool public paused;
+
+  // Reputation
+  struct Rep { uint256 raw; uint64 lastUpdate; }
+  mapping(address=>Rep) private rep;
+
+  // Badges (SBT)
+  string public baseURI;
+  uint256 public nextTokenId;
+  mapping(uint256=>address) public ownerOf;
+  mapping(uint256=>bool) public revoked;
+  mapping(address=>uint256) public balanceActive;
+  uint256 public activeSupply;
+
+  // Decay
+  uint64  public halfLifeDays;
+  uint64  public halfLifeSeconds;
+  uint256 private constant LN2_E9 = 693_147_180; // ~ln(2) * 1e9
+
+  // Events
+  event RoleGranted(bytes32 indexed role, address indexed account);
+  event RoleRevoked(bytes32 indexed role, address indexed account);
+  event Paused(address indexed by);
+  event Unpaused(address indexed by);
+  event Issued(address indexed to, uint256 amount, uint256 tokenId, string uri);
+  event Slashed(address indexed from, uint256 amount, string reason);
+  event Revoked(uint256 indexed tokenId, address indexed from);
+  event BaseURISet(string uri);
+  event DecaySet(uint64 halfLifeDays);
+  event Upgraded(address indexed newImpl);
+
+  bool private _initialized;
+
+  // Modifiers
+  modifier onlyRole(bytes32 r){ if(!roles[r][msg.sender]) revert Unauthorized(); _; }
+  modifier whenNotPaused(){ if(paused) revert Paused(); _; }
+
+  // Init
+  function initialize(
+    address admin, address guard, bytes32 contractKey_,
+    bytes32 docHashA_, bytes32 docHashB_, string memory labelA, string memory labelB,
+    uint64 halfLifeDays_, string memory baseURI_
+  ) external {
+    if(_initialized) revert Unauthorized();
+    if(admin==address(0)) revert ZeroAddress();
+    _initialized=true;
+    _grant(ADMIN_ROLE,admin); _grant(ISSUER_ROLE,admin); _grant(SLASH_ROLE,admin); _grant(PAUSER_ROLE,admin);
+    _integrityInit(guard, contractKey_, docHashA_, docHashB_, labelA, labelB);
+    _setDecayHalfLifeDays(halfLifeDays_);
+    if(bytes(baseURI_).length>0){ baseURI=baseURI_; emit BaseURISet(baseURI_); }
+  }
+
+  // Roles
+  function hasRole(bytes32 role, address account) public view returns(bool){ return roles[role][account]; }
+  function grantRole(bytes32 role, address account) external ensureIntegrity onlyRole(ADMIN_ROLE) {
+    if(account==address(0)) revert ZeroAddress(); if(!roles[role][account]){ roles[role][account]=true; emit RoleGranted(role,account); }
+  }
+  function revokeRole(bytes32 role, address account) external ensureIntegrity onlyRole(ADMIN_ROLE) {
+    if(roles[role][account]){ roles[role][account]=false; emit RoleRevoked(role,account); }
+  }
+  function renounceRole(bytes32 role) external ensureIntegrity { if(roles[role][msg.sender]){ roles[role][msg.sender]=false; emit RoleRevoked(role,msg.sender);} }
+
+  // Pause
+  function pause() external ensureIntegrity onlyRole(PAUSER_ROLE){ paused=true; emit Paused(msg.sender); }
+  function unpause() external ensureIntegrity onlyRole(PAUSER_ROLE){ paused=false; emit Unpaused(msg.sender); }
+
+  // Issue / Slash / Revoke
+  function issue(address to, uint256 amount, string calldata tokenUri) external ensureIntegrity onlyRole(ISSUER_ROLE) whenNotPaused {
+    if(to==address(0)) revert ZeroAddress(); if(amount==0) revert ZeroAmount();
+    _bumpRep(to, amount, true);
+    unchecked{ ++nextTokenId; }
+    uint256 id=nextTokenId; ownerOf[id]=to;
+    unchecked{ ++balanceActive[to]; ++activeSupply; }
+    emit Issued(to, amount, id, tokenUri);
+  }
+
+  function batchIssue(address[] calldata to, uint256[] calldata amount, string[] calldata tokenUri) external ensureIntegrity onlyRole(ISSUER_ROLE) whenNotPaused {
+    if(to.length!=amount.length || to.length!=tokenUri.length) revert LengthMismatch();
+    for(uint256 i; i<to.length; ++i){
+      if(to[i]==address(0)) revert ZeroAddress(); if(amount[i]==0) revert ZeroAmount();
+      _bumpRep(to[i], amount[i], true);
+      unchecked{ ++nextTokenId; }
+      uint256 id=nextTokenId; ownerOf[id]=to[i];
+      unchecked{ ++balanceActive[to[i]]; ++activeSupply; }
+      emit Issued(to[i], amount[i], id, tokenUri[i]);
+    }
+  }
+
+  function slash(address from, uint256 amount, string calldata reason) external ensureIntegrity onlyRole(SLASH_ROLE) whenNotPaused {
+    if(from==address(0)) revert ZeroAddress(); if(amount==0) revert ZeroAmount();
+    _bumpRep(from, amount, false);
+    emit Slashed(from, amount, reason);
+  }
+
+  function batchSlash(address[] calldata from, uint256[] calldata amount, string[] calldata reason) external ensureIntegrity onlyRole(SLASH_ROLE) whenNotPaused {
+    if(from.length!=amount.length || from.length!=reason.length) revert LengthMismatch();
+    for(uint256 i; i<from.length; ++i){
+      if(from[i]==address(0)) revert ZeroAddress(); if(amount[i]==0) revert ZeroAmount();
+      _bumpRep(from[i], amount[i], false);
+      emit Slashed(from[i], amount[i], reason[i]);
+    }
+  }
+
+  function revoke(uint256 tokenId) external ensureIntegrity onlyRole(ISSUER_ROLE) whenNotPaused {
+    address holder=ownerOf[tokenId];
+    if(holder==address(0)) revert NoToken();
+    if(revoked[tokenId]) revert AlreadyRevoked();
+    revoked[tokenId]=true;
+    if(balanceActive[holder]>0){ unchecked{ --balanceActive[holder]; } }
+    if(activeSupply>0){ unchecked{ --activeSupply; } }
+    emit Revoked(tokenId, holder);
+  }
+
+  // Views
+  function reputationOf(address a) public view returns(uint256){
+    Rep memory r=rep[a]; if(r.raw==0) return 0;
+    uint256 T=uint256(halfLifeSeconds); if(T==0) return r.raw;
+    uint256 dt = block.timestamp - uint256(r.lastUpdate);
+    uint256 halves = dt / T; uint256 rem = dt % T;
+    uint256 v = r.raw >> halves; if(v==0) return 0;
+    uint256 factorE9 = 1_000_000_000 - (LN2_E9 * rem) / T;
+    if(factorE9==0) return 0;
+    return (v * factorE9) / 1_000_000_000;
+  }
+  function tokenURI(uint256 tokenId) external view returns(string memory){
+    if(ownerOf[tokenId]==address(0)) revert NoToken();
+    if(bytes(baseURI).length==0) return "";
+    return string(abi.encodePacked(baseURI, _toString(tokenId)));
+  }
+  function totalIssued() external view returns(uint256){ return nextTokenId; }
+
+  // Admin params
+  function setBaseURI(string calldata u) external ensureIntegrity onlyRole(ADMIN_ROLE){ baseURI=u; emit BaseURISet(u); }
+  function setDecayHalfLifeDays(uint64 d) external ensureIntegrity onlyRole(ADMIN_ROLE){ _setDecayHalfLifeDays(d); }
+  function setDocumentHashes(bytes32 a, bytes32 b, string calldata la, string calldata lb) external ensureIntegrity onlyRole(ADMIN_ROLE){
+    docHashA=a; docHashB=b; docLabelA=la; docLabelB=lb; emit DocumentHashesSet(a,b,la,lb);
+  }
+
+  // Upgrade
+  function upgradeTo(address newImpl) external onlyRole(ADMIN_ROLE){
+    if(newImpl==address(0)) revert ZeroAddress();
+    bytes32 h; assembly{ h := extcodehash(newImpl) }
+    require(integrityGuard.isAllowed(contractKey,h),"INTEGRITY");
+    bytes32 slot=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+    assembly{ sstore(slot, newImpl) }
+    emit Upgraded(newImpl);
+  }
+
+  // Internals
+  function _bumpRep(address a, uint256 amt, bool add) internal {
+    Rep storage r=rep[a]; uint256 cur=reputationOf(a);
+    r.raw = add ? cur + amt : (cur>amt ? cur-amt : 0);
+    r.lastUpdate = uint64(block.timestamp);
+  }
+  function _setDecayHalfLifeDays(uint64 d) internal {
+    halfLifeDays = d==0 ? 30 : d; halfLifeSeconds = halfLifeDays * 86400; emit DecaySet(halfLifeDays);
+  }
+  function _toString(uint256 v) internal pure returns(string memory){
+    if(v==0) return "0"; uint256 j=v; uint256 len; while(j!=0){ len++; j/=10; }
+    bytes memory b=new bytes(len); j=v; uint256 k=len;
+    while(j!=0){ k--; b[k]=bytes1(uint8(48 + j%10)); j/=10; } return string(b);
+  }
+  function version() external pure returns(string memory){ return "ReputationSBT/2.1.0-pro"; }
+}
+`,
+  Proxy: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+/** Minimal ERC1967 proxy: stores impl in EIP-1967 slot; delegatecalls; initializer in ctor. */
+contract ERC1967Proxy {
+  bytes32 private constant _IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+  constructor(address logic, bytes memory initData){
+    assembly{ sstore(_IMPL_SLOT, logic) }
+    if(initData.length>0){ (bool ok,) = logic.delegatecall(initData); require(ok,"init fail"); }
+  }
+  fallback() external payable { assembly {
+    let impl := sload(_IMPL_SLOT)
+    calldatacopy(0,0,calldatasize())
+    let r := delegatecall(gas(),impl,0,calldatasize(),0,0)
+    returndatacopy(0,0,returndatasize())
+    switch r case 0 { revert(0, returndatasize()) } default { return(0, returndatasize()) }
+  } }
+  receive() external payable {}
+}
+`
+};
+
+/* ===== compile ===== */
+async function compileAll(){
+  const input={language:"Solidity",settings:{optimizer:{enabled:true,runs:200},outputSelection:{"*":{"*":["abi","evm.bytecode.object"]}}},sources:{
+    "Ownable.sol":{content:SRC.Ownable},
+    "IAntiInversionGuard.sol":{content:SRC.IAnti},
+    "AntiInversionGuard.sol":{content:SRC.Guard},
+    "IntegrityGuarded.sol":{content:SRC.Guarded},
+    "ReputationSBT.sol":{content:SRC.SBT},
+    "ERC1967Proxy.sol":{content:SRC.Proxy}
+  }};
+  const solc = await new Promise(res=>Module.onRuntimeInitialized=()=>res(Module));
+  const out = JSON.parse(solc.cwrap("compileStandard","string",["string"])(JSON.stringify(input)));
+  if(out.errors){
+    const fatal = out.errors.filter(e=>e.severity==='error');
+    if(fatal.length) throw new Error(fatal.map(e=>e.formattedMessage).join("\n"));
+  }
+  const get=(file,name)=>({abi:out.contracts[file][name].abi, bytecode:'0x'+out.contracts[file][name].evm.bytecode.object});
+  return {
+    Guard: get("AntiInversionGuard.sol","AntiInversionGuard"),
+    SBT:   get("ReputationSBT.sol","ReputationSBT"),
+    Proxy: get("ERC1967Proxy.sol","ERC1967Proxy")
+  };
+}
+
+/* ===== dual hash ===== */
+$('btnHash').onclick=async()=>{
+  const txt=$('docText').value||''; const enc=new TextEncoder(); const bytes=enc.encode(txt);
+  const sha=await sha256(bytes); $('hashA').value=toBytes32(sha);
+  const bl=blake3.hash(bytes); const blHex='0x'+[...bl].map(b=>b.toString(16).padStart(2,'0')).join('');
+  $('hashB').value=toBytes32(blHex);
+  $('outDoc').textContent=`sha256:${$('hashA').value} | blake3:${$('hashB').value}`;
+};
+
+/* ===== deploy flow ===== */
+$('btnDeploy').onclick=async()=>{
+  const out=$('deployOut'); log(out,'Compiling…');
+  try{
+    if(!signer) throw new Error('Connect wallet first');
+    const compiled = await compileAll();
+
+    const admin = $('admin').value || account;
+    const existingGuard = $('guardAddr').value.trim();
+    const key = toBytes32($('ckey').value || '0x');
+    const half = parseInt($('decayDays').value||'30',10);
+    const base = $('baseURI').value||'';
+    const hA = $('hashA').value || '0x';
+    const hB = $('hashB').value || '0x';
+
+    // Guard
+    let guardAddr = existingGuard;
+    if(!guardAddr){
+      log(out,'Deploying AntiInversionGuard…');
+      const GF=new ethers.ContractFactory(compiled.Guard.abi, compiled.Guard.bytecode, signer);
+      const g=await GF.deploy(); await g.waitForDeployment(); guardAddr=await g.getAddress();
+    }
+    $('outGuard').textContent=guardAddr;
+
+    // Impl
+    log(out,'Deploying ReputationSBT implementation…');
+    const SF=new ethers.ContractFactory(compiled.SBT.abi, compiled.SBT.bytecode, signer);
+    const impl=await SF.deploy(); await impl.waitForDeployment(); const implAddr=await impl.getAddress();
+    $('outImpl').textContent=implAddr;
+
+    const code=await provider.getCode(implAddr);
+    const codeHash=ethers.keccak256(code);
+    $('outHash').textContent=codeHash;
+
+    // Allow-list impl
+    log(out,'Allow-listing impl codeHash in Guard…');
+    const guard=new ethers.Contract(guardAddr, compiled.Guard.abi, signer);
+    const txAllow=await guard.allow(key, codeHash, 'ReputationSBT impl'); await txAllow.wait();
+
+    // Initialize via proxy
+    const iface = new ethers.Interface(compiled.SBT.abi);
+    const init = iface.encodeFunctionData('initialize', [admin, guardAddr, key, hA, hB, 'sha256','blake3', half, base]);
+
+    log(out,'Deploying ERC1967Proxy (+ initialize)…');
+    const PF=new ethers.ContractFactory(compiled.Proxy.abi, compiled.Proxy.bytecode, signer);
+    const proxy=await PF.deploy(implAddr, init); await proxy.waitForDeployment();
+    const proxyAddr=await proxy.getAddress();
+
+    $('outProxy').textContent=proxyAddr; $('outKey').textContent=key; $('sbtAddr').value=proxyAddr;
+    log(out,`✅ Deployed\nGuard ${guardAddr}\nImpl ${implAddr}\nProxy ${proxyAddr}\ncodeHash ${codeHash}`);
+
+    // Auto-register in hub
+    try{ await autoRegisterInHub('ReputationSBT', proxyAddr, compiled.SBT.abi); }catch{}
+
+  }catch(e){ log(out,'⛔ '+(e?.message||String(e))); }
+};
+
+/* ===== verify (quick) ===== */
+$('btnVerify').onclick=async()=>{ await doVerify($('sbtAddr').value || $('outProxy').textContent, $('outGuard').textContent || $('guardAddr').value, $('outKey').textContent || toBytes32($('ckey').value)); };
+$('btnVerify2').onclick=async()=>{ await doVerify($('vProxy').value,$('vGuard').value,$('vKey').value); };
+
+async function doVerify(proxy, guard, key){
+  const out=$('verifyOut');
+  try{
+    if(!provider) throw new Error('Connect wallet');
+    const IMPL_SLOT='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+    const implSlot=await provider.getStorage(proxy, IMPL_SLOT);
+    const impl='0x'+implSlot.slice(26);
+    const code=await provider.getCode(impl);
+    const h=ethers.keccak256(code);
+    const gAbi=[{"type":"function","stateMutability":"view","outputs":[{"type":"bool"}],"name":"isAllowed","inputs":[{"type":"bytes32"},{"type":"bytes32"}]}];
+    const g=new ethers.Contract(guard,gAbi,provider);
+    const ok=await g.isAllowed(key,h);
+    out.textContent=(ok?'✅ OK':'⛔ FAIL')+`\nimpl ${impl}\ncodeHash ${h}`;
+  }catch(e){ out.textContent='⛔ '+(e?.message||e); }
+}
+
+/* ===== operate ===== */
+let cached; async function abi(){ return cached||(cached=await compileAll()); }
+function roleHash(name){ return ethers.keccak256(ethers.toUtf8Bytes(name||'')); }
+async function getSbt(sign=true){
+  const A=await abi(); const addr=$('sbtAddr').value || $('outProxy').textContent;
+  if(!addr) throw new Error('Proxy address missing');
+  return new ethers.Contract(addr, A.SBT.abi, sign? signer: provider);
+}
+
+$('btnIssue').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getSbt(); const to=$('issueTo').value; const amt=BigInt($('issueAmt').value||'0'); const uri=$('issueURI').value||"";
+  const tx=await c.issue(to, amt, uri); const rc=await tx.wait(); out.textContent='✅ Issued '+amt+' → '+to+'\n'+rc.hash; award({k:'event',n:'Issued'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnSlash').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getSbt(); const a=$('slashFrom').value; const amt=BigInt($('slashAmt').value||'0'); const r=$('slashReason').value||'';
+  const tx=await c.slash(a, amt, r); const rc=await tx.wait(); out.textContent='🔥 Slashed '+amt+' from '+a+'\n'+rc.hash; award({k:'event',n:'Slashed'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnRevoke').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getSbt(); const id=BigInt($('revokeId').value||'0');
+  const tx=await c.revoke(id); const rc=await tx.wait(); out.textContent='🚫 Revoked #'+id+'\n'+rc.hash; award({k:'event',n:'Revoked'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnBatchIssue').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getSbt(); const to=JSON.parse($('batchTo').value||'[]'); const amt=JSON.parse($('batchAmt').value||'[]'); const uri=JSON.parse($('batchURI').value||'[]');
+  const tx=await c.batchIssue(to, amt.map(x=>BigInt(x)), uri); const rc=await tx.wait(); out.textContent='✅ Batch Issue ok\n'+rc.hash; award({k:'event',n:'Issued'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnBatchSlash').onclick=async()=>{ const out=$('opsOut'); try{
+  const c=await getSbt(); const from=JSON.parse($('batchFrom').value||'[]'); const amt=JSON.parse($('batchSlashAmt').value||'[]'); const rsn=JSON.parse($('batchReason').value||'[]');
+  const tx=await c.batchSlash(from, amt.map(x=>BigInt(x)), rsn); const rc=await tx.wait(); out.textContent='🔥 Batch Slash ok\n'+rc.hash; award({k:'event',n:'Slashed'})
+}catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnSetBase').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(); const u=$('paramBase').value; const tx=await c.setBaseURI(u); const rc=await tx.wait(); out.textContent='🔗 BaseURI set\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnSetHalf').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(); const d=BigInt(parseInt($('paramHalf').value||'30',10)); const tx=await c.setDecayHalfLifeDays(Number(d)); const rc=await tx.wait(); out.textContent='⏳ Decay set\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnSetDocs').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(); const a=$('paramA').value; const b=$('paramB').value; const la=$('paramLA').value||'sha256'; const lb=$('paramLB').value||'blake3';
+  const tx=await c.setDocumentHashes(a,b,la,lb); const rc=await tx.wait(); out.textContent='📜 Docs updated\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnGrant').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(); const r=roleHash($('roleNameG').value); const a=$('roleAddrG').value; const tx=await c.grantRole(r,a); const rc=await tx.wait(); out.textContent='🔑 Granted\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnRevoke').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(); const r=roleHash($('roleNameR').value); const a=$('roleAddrR').value; const tx=await c.revokeRole(r,a); const rc=await tx.wait(); out.textContent='🗝️ Revoked\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnRenounce').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(); const r=roleHash($('roleNameX').value); const tx=await c.renounceRole(r); const rc=await tx.wait(); out.textContent='🙅 Renounced\n'+rc.hash }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+$('btnReadRep').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(false); const a=$('readAddr').value; const v=await c.reputationOf(a); out.textContent='rep('+a+') = '+v.toString() }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnReadURI').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(false); const id=BigInt($('readId').value||'0'); const v=await c.tokenURI(id); out.textContent='uri('+id+') = '+v }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnTotalIssued').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(false); const v=await c.totalIssued(); out.textContent='totalIssued = '+v.toString() }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnActiveSupply').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(false); const v=await c.activeSupply(); out.textContent='activeSupply = '+v.toString() }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnReadBal').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(false); const a=$('readBalAddr').value; const v=await c.balanceActive(a); out.textContent='balanceActive('+a+') = '+v.toString() }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnHasRole').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(false); const r=roleHash($('readRole').value); const a=$('readRoleAddr').value; const v=await c.hasRole(r,a); out.textContent='hasRole('+a+') = '+v }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+$('btnVersion').onclick=async()=>{ const out=$('opsOut'); try{ const c=await getSbt(false); const v=await c.version(); out.textContent='version = '+v }catch(e){ out.textContent='⛔ '+(e?.message||e)}};
+
+/* ===== events + XP ===== */
+let sub;
+$('btnSubscribe').onclick=async()=>{
+  const feed=$('xpFeed'); feed.textContent='';
+  try{
+    const A=await abi(); const addr=$('sbtAddr').value || $('outProxy').textContent;
+    if(!addr) throw new Error('Proxy address missing');
+    if(sub){ sub.removeAllListeners(); sub = null; }
+    sub=new ethers.Contract(addr, A.SBT.abi, provider);
+    const evs=['Issued','Slashed','Revoked','RoleGranted','RoleRevoked','Paused','Unpaused','Upgraded'];
+    evs.forEach(name=>{
+      try{
+        sub.on(name, (...args)=>{ const evt=args.at(-1); const data=args.slice(0,-1);
+          const line = `${new Date().toLocaleTimeString()} · ${name} · ${JSON.stringify(data)}`;
+          feed.textContent = (line+'\n'+feed.textContent).slice(0,8000);
+          award({k:'event',n:name});
+        });
+      }catch{}
+    });
+  }catch(e){ feed.textContent='⛔ '+(e?.message||e); }
+};
+
+let XP=0, Badges=0, Streak=0, LastDay=null;
+const XP_MAP={ Issued:6, Slashed:5, Revoked:4, RoleGranted:1, RoleRevoked:1, Paused:1, Unpaused:1, Upgraded:8 };
+function award(evt){
+  const d=Math.floor(Date.now()/86400000);
+  if(LastDay===null || d>LastDay){ Streak++; LastDay=d; }
+  const pts = XP_MAP[evt.n] || 2;
+  XP += pts; if(XP%50===0) Badges++;
+  $('xpTotal').textContent=XP; $('streak').textContent=Streak; $('badges').textContent=Badges;
+}
+
+/* ===== auto-register in hub ===== */
+async function autoRegisterInHub(title,address,abi){
+  const open = indexedDB.open('PeaceGameHub', 1);
+  const db = await new Promise((res,rej)=>{
+    open.onerror=()=>rej(open.error);
+    open.onupgradeneeded=(e)=>{ const d=e.target.result; if(!d.objectStoreNames.contains('contracts')) d.createObjectStore('contracts',{keyPath:'title'}); };
+    open.onsuccess=()=>res(open.result);
+  });
+  await new Promise((res,rej)=>{
+    const tx=db.transaction('contracts','readwrite'); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+    tx.objectStore('contracts').put({title,address,abi});
+  });
+}
+
+/* ===== dual-hash quick-fill on load if textarea has content ===== */
+addEventListener('load',()=>{const v=$('docText').value; if(v) $('btnHash').click();});
+</script>
+</body>
+</html>
